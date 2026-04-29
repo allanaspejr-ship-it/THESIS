@@ -7,6 +7,7 @@ chronological split and operational MAPE definition as optimized Cell 2.
 
 import math
 import re
+import warnings
 from pathlib import Path
 
 import joblib
@@ -16,6 +17,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from xgboost import XGBRegressor
 
+warnings.filterwarnings("ignore", category=pd.errors.PerformanceWarning)
 
 PROJECT_DIR = Path(__file__).resolve().parents[2]
 OPT_DIR = PROJECT_DIR / "optimized_version"
@@ -199,6 +201,18 @@ def forecast_benchmark_24h(raw_df, planned, models_by_plant):
     return forecast
 
 
+def save_forecast_outputs(forecast, safe_name):
+    xlsx_path = BENCH_OUT_DIR / f"Day_Ahead_24H_{safe_name}_Forecast.xlsx"
+    csv_path = BENCH_OUT_DIR / f"Day_Ahead_24H_{safe_name}_Forecast.csv"
+    try:
+        forecast.to_excel(xlsx_path, index=False)
+    except PermissionError:
+        fallback_xlsx = BENCH_OUT_DIR / f"Day_Ahead_24H_{safe_name}_Forecast_regenerated.xlsx"
+        forecast.to_excel(fallback_xlsx, index=False)
+        print(f"Workbook locked, saved fallback: {fallback_xlsx}")
+    forecast.to_csv(csv_path, index=False)
+
+
 def main():
     clean_path = OUT_DIR / "cleaned_hourly_data.parquet"
     if not clean_path.exists():
@@ -218,7 +232,7 @@ def main():
         train, val, test = split(work)
 
         models = {
-            "Random Forest": RandomForestRegressor(n_estimators=400, min_samples_leaf=2, random_state=42, n_jobs=-1),
+            "Random Forest": RandomForestRegressor(n_estimators=400, min_samples_leaf=2, random_state=42, n_jobs=1),
             "XGBoost": XGBRegressor(
                 n_estimators=500,
                 learning_rate=0.03,
@@ -227,7 +241,7 @@ def main():
                 colsample_bytree=0.9,
                 objective="reg:squarederror",
                 random_state=42,
-                n_jobs=-1,
+                n_jobs=1,
             ),
         }
 
@@ -262,8 +276,7 @@ def main():
     for name, models_by_plant in forecast_models.items():
         forecast = forecast_benchmark_24h(raw_df, planned, models_by_plant)
         safe_name = name.upper().replace(" ", "_")
-        forecast.to_excel(BENCH_OUT_DIR / f"Day_Ahead_24H_{safe_name}_Forecast.xlsx", index=False)
-        forecast.to_csv(BENCH_OUT_DIR / f"Day_Ahead_24H_{safe_name}_Forecast.csv", index=False)
+        save_forecast_outputs(forecast, safe_name)
     print(result.to_string(index=False))
     print("Saved:", out_path)
     print("Saved benchmark forecasts:", BENCH_OUT_DIR)

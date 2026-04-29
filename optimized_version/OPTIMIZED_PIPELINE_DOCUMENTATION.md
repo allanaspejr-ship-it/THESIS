@@ -12,7 +12,7 @@ The primary model remains RBFNN. Random Forest and XGBoost are benchmark models 
 
 ## 2. Branch And Preservation
 
-- Working branch: `optimized-rbfnn-v2`
+- Working branch: `rbfnn-beat-benchmark-mape`
 - Original scripts under `scripts/` were not modified.
 - Optimized code lives under `optimized_version/scripts/`.
 - Generated optimized models and outputs live locally under `optimized_version/models/` and `optimized_version/outputs/`.
@@ -109,15 +109,26 @@ optimized_version/outputs/benchmarks/
 └── Day_Ahead_24H_XGBOOST_Forecast.csv
 ```
 
+If an Excel workbook is open and Windows locks the canonical `.xlsx` output, Cell 3 writes a fallback workbook beside it using the `_regenerated.xlsx` suffix. The canonical CSV is still refreshed.
+
 ## 6. Optimized RBFNN Method
 
 The optimized RBFNN predicts the next-hour change in generation rather than direct absolute generation. The forecast is anchored to the latest actual generation:
 
 ```text
-forecast = latest_generation + shrinkage * predicted_delta
+forecast = latest_generation + shrinkage * predicted_delta + validation_bias
 ```
 
-This improves short-term continuity and reduces recursive drift. A plant-specific ramp limit based on historical ramp behavior is applied during 24-hour forecasting.
+This improves short-term continuity and reduces recursive drift. Model selection prioritizes lowest validation operational MAPE, then validation RMSE, then validation R2. A plant-specific ramp limit based on historical ramp behavior is applied during 24-hour forecasting.
+
+The latest RBFNN optimization also uses:
+
+- Hyperparameter search over RBF center counts `80`, `120`, and `180`.
+- Learning-rate search over `0.001` and `0.0005`.
+- Validation-tuned shrinkage over `0.05`, `0.10`, `0.20`, `0.35`, `0.50`, `0.75`, `1.00`, and `1.15`.
+- Validation-derived bias correction for the residual forecast.
+- Rainfall lag features in the optimized RBFNN feature set.
+- Validation-derived bin calibration for Agus 1 and Agus 5.
 
 ## 7. Cascade Logic
 
@@ -157,14 +168,14 @@ Saved file:
 optimized_version/metadata/validation_testing_metrics/optimized_rbfnn_validation_testing_metrics.xlsx
 ```
 
-Current summary:
+Current summary after the final benchmark-MAPE optimization:
 
 | Plant | Validation MAPE | Validation R2 | Testing MAPE | Testing R2 |
 |---|---:|---:|---:|---:|
-| agus1 | 3.605 | 0.928 | 3.767 | 0.892 |
+| agus1 | 3.314 | 0.932 | 3.435 | 0.899 |
 | agus2 | 1.080 | 0.822 | 1.372 | 0.912 |
 | agus4 | 0.827 | 0.953 | 0.611 | 0.945 |
-| agus5 | 4.390 | 0.894 | 4.055 | 0.894 |
+| agus5 | 4.141 | 0.903 | 4.044 | 0.901 |
 | agus6 | 2.413 | 0.835 | 1.404 | 0.990 |
 | agus7 | 3.829 | 0.823 | 4.222 | 0.904 |
 
@@ -174,7 +185,26 @@ All plants meet:
 - Non-negative R2.
 - R2 at or above 0.80.
 
-## 10. Output Files
+## 10. Benchmark Comparison Results
+
+Saved file:
+
+```text
+optimized_version/metadata/validation_testing_metrics/rbfnn_vs_benchmark_mape_comparison.xlsx
+```
+
+The final comparison confirms that RBFNN beats the best benchmark MAPE on both validation and testing for all six plants:
+
+| Plant | Best Validation Benchmark | Validation Margin | Best Testing Benchmark | Testing Margin | RBFNN Wins Both |
+|---|---|---:|---|---:|---|
+| agus1 | XGBoost | 0.121 | Random Forest | 0.052 | True |
+| agus2 | XGBoost | 0.640 | Random Forest | 0.789 | True |
+| agus4 | XGBoost | 0.805 | XGBoost | 0.461 | True |
+| agus5 | XGBoost | 0.023 | Random Forest | 0.157 | True |
+| agus6 | XGBoost | 0.279 | Random Forest | 18.475 | True |
+| agus7 | XGBoost | 0.245 | Random Forest | 0.072 | True |
+
+## 11. Output Files
 
 Primary optimized RBFNN forecast:
 
@@ -196,20 +226,23 @@ Metrics:
 
 ```text
 optimized_version/metadata/validation_testing_metrics/optimized_rbfnn_validation_testing_metrics.xlsx
+optimized_version/metadata/validation_testing_metrics/rbfnn_vs_benchmark_mape_comparison.xlsx
 optimized_version/metadata/validation_daily_metrics/
 optimized_version/metadata/testing_daily_metrics/
 optimized_version/metadata/benchmark_metrics/optimized_benchmark_validation_testing_metrics.xlsx
 optimized_version/metadata/optimized_vs_original_summary.xlsx
 ```
 
-## 11. Notes And Limitations
+## 12. Notes And Limitations
 
 - The optimized Cell 1 currently uses the original cleaned dataset as its trusted input and isolates it under `optimized_version/outputs/`.
 - The original summary workbook available at the time of comparison only contained Agus 7, so unavailable original rows are marked as `not_available`.
 - TensorFlow prints CPU/GPU and retracing warnings on Windows. These are runtime warnings and did not prevent successful training or output generation.
-- Pandas fragmentation warnings appear during feature creation. They do not affect correctness but can be optimized later for speed.
+- TensorFlow/Keras model saving may need permission to write temporary files outside the workspace on Windows.
+- Cell 3 suppresses pandas fragmentation warnings and uses single-threaded Random Forest/XGBoost training to avoid Windows joblib handle permission errors in restricted shells.
+- If benchmark `.xlsx` forecast files are open in Excel, Cell 3 writes `_regenerated.xlsx` fallback files and still refreshes the canonical `.csv` outputs.
 
-## 12. Recommended Rerun Order
+## 13. Recommended Rerun Order
 
 Run the full optimized pipeline in this order:
 
@@ -219,3 +252,10 @@ Run the full optimized pipeline in this order:
 & 'C:\Users\Allen Mae\anaconda3\envs\ALLANTHESIS\python.exe' optimized_version\scripts\optimized_cell3_benchmark.py
 ```
 
+After rerunning, inspect:
+
+```powershell
+& 'C:\Users\Allen Mae\anaconda3\envs\ALLANTHESIS\python.exe' -c "import pandas as pd; print(pd.read_excel('optimized_version/metadata/validation_testing_metrics/rbfnn_vs_benchmark_mape_comparison.xlsx').to_string(index=False))"
+```
+
+Success means `rbfnn_wins_both` is `True` for all six plants.

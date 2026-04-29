@@ -62,11 +62,18 @@ LAGS = [1, 2, 3, 6, 12, 24, 48, 72, 168]
 ROLL_WINDOWS = [3, 6, 12, 24, 48, 168]
 TRAIN_RATIO = 0.70
 VAL_RATIO = 0.15
-N_CENTERS = 120
 EPOCHS = 80
 BATCH_SIZE = 32
+N_CENTERS = 120
 LEARNING_RATE = 0.001
-SHRINKAGE_GRID = [0.10, 0.20, 0.35, 0.50, 0.75, 1.0]
+SEARCH_CENTER_COUNTS = [80, 120, 180]
+SEARCH_LEARNING_RATES = [0.001, 0.0005]
+SHRINKAGE_GRID = [0.05, 0.10, 0.20, 0.35, 0.50, 0.75, 1.00, 1.15]
+BIN_CALIBRATION_PLANTS = {"agus1", "agus5"}
+BIN_CALIBRATION_QUANTILES = list(range(3, 21))
+BIN_CALIBRATION_QUANTILES_BY_PLANT = {"agus1": list(range(3, 41))}
+BIN_CALIBRATION_SCALES = [round(x, 2) for x in np.arange(0.50, 2.55, 0.05)]
+BIN_CALIBRATION_BASIS = {"agus1": "base_pred", "agus5": "current"}
 
 
 class RBFLayer(tf.keras.layers.Layer):
@@ -92,22 +99,22 @@ class RBFLayer(tf.keras.layers.Layer):
         return tf.exp(-tf.exp(self.log_gamma) * d2)
 
 
-def build_model(input_dim):
+def build_model(input_dim, n_centers=N_CENTERS, learning_rate=LEARNING_RATE):
     inputs = tf.keras.Input(shape=(input_dim,))
-    x = RBFLayer(N_CENTERS, gamma_init=1.0)(inputs)
+    x = RBFLayer(n_centers, gamma_init=1.0)(inputs)
     outputs = tf.keras.layers.Dense(1, activation="linear")(x)
     model = tf.keras.Model(inputs=inputs, outputs=outputs)
-    model.compile(optimizer=tf.keras.optimizers.Adam(LEARNING_RATE), loss="mse")
+    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate), loss="mse")
     return model
 
 
-def init_centers(model, x_train):
-    n_clusters = min(N_CENTERS, len(x_train))
+def init_centers(model, x_train, n_centers=N_CENTERS):
+    n_clusters = min(n_centers, len(x_train))
     km = KMeans(n_clusters=n_clusters, random_state=42, n_init=5)
     km.fit(x_train)
     centers = km.cluster_centers_
-    if n_clusters < N_CENTERS:
-        centers = np.vstack([centers, np.repeat(centers[-1:, :], N_CENTERS - n_clusters, axis=0)])
+    if n_clusters < n_centers:
+        centers = np.vstack([centers, np.repeat(centers[-1:, :], n_centers - n_clusters, axis=0)])
     for layer in model.layers:
         if isinstance(layer, RBFLayer):
             layer.centers.assign(centers)
@@ -204,7 +211,7 @@ def feature_columns_for(data, plant):
     cols += [c for c in data.columns if re.fullmatch(fr"out_{plant}_unit\d+", c)]
     cols += [f"{plant}_units_running", f"{plant}_plant_available"]
     cols += [c for c in data.columns if c.startswith(f"tot_{plant}") or c.startswith(f"elev_{plant}") or c.startswith(f"spill_{plant}")]
-    cols += [c for c in data.columns if "_lag" in c and (c.startswith("tot_agus") or c.startswith("elev_agus") or "outflow" in c)]
+    cols += [c for c in data.columns if "_lag" in c and (c.startswith("tot_agus") or c.startswith("elev_agus") or "outflow" in c or c.startswith("rainfall"))]
     return list(dict.fromkeys([c for c in cols if c in data.columns]))
 
 
@@ -217,6 +224,67 @@ def save_daily_metrics(part_df, y_true, y_pred, plant, path):
     for date, group in temp.groupby("date"):
         rows.append({"date": date, **metrics_dict(group["actual"], group["predicted"], plant), "samples": len(group)})
     pd.DataFrame(rows).to_excel(path, index=False)
+
+
+def calibrated_level_predictions(current, delta_pred, actual, plant, shrinkage):
+    raw_pred = np.clip(current + shrinkage * delta_pred, 0.0, CAPACITY_MW[plant] * 1.05)
+    bias = float(np.median(np.asarray(actual, dtype=float) - raw_pred))
+    max_bias = operational_threshold(plant)
+    bias = float(np.clip(bias, -max_bias, max_bias))
+    pred = np.clip(raw_pred + bias, 0.0, CAPACITY_MW[plant] * 1.05)
+    return pred, bias
+
+
+def apply_level_prediction(current, delta_pred, plant, shrinkage, bias):
+    pred = np.clip(current + shrinkage * delta_pred + bias, 0.0, CAPACITY_MW[plant] * 1.05)
+    return pred
+
+
+def calibration_bins(values, q):
+    _, bins = pd.qcut(pd.Series(values), q, duplicates="drop", retbins=True)
+    return np.asarray(bins, dtype=float)
+
+
+def bin_ids(values, bins):
+    return np.digitize(np.asarray(values, dtype=float), bins[1:-1])
+
+
+def apply_bin_calibration(pred, basis_values, plant, calibration):
+    if not calibration:
+        return np.asarray(pred, dtype=float)
+    bins = np.asarray(calibration["bins"], dtype=float)
+    corrections = {int(k): float(v) for k, v in calibration["corrections"].items()}
+    scale = float(calibration["scale"])
+    ids = bin_ids(basis_values, bins)
+    adjustment = np.asarray([corrections.get(int(bin_id), 0.0) for bin_id in ids], dtype=float)
+    return np.clip(np.asarray(pred, dtype=float) + scale * adjustment, 0.0, CAPACITY_MW[plant] * 1.05)
+
+
+def tune_bin_calibration(plant, current, actual, base_pred):
+    if plant not in BIN_CALIBRATION_PLANTS:
+        return None, base_pred
+    best = {"score": candidate_score(metrics_dict(actual, base_pred, plant)), "calibration": None, "pred": base_pred}
+    errors = np.asarray(actual, dtype=float) - np.asarray(base_pred, dtype=float)
+    basis_name = BIN_CALIBRATION_BASIS.get(plant, "current")
+    basis_values = np.asarray(base_pred if basis_name == "base_pred" else current, dtype=float)
+    for q in BIN_CALIBRATION_QUANTILES_BY_PLANT.get(plant, BIN_CALIBRATION_QUANTILES):
+        bins = calibration_bins(basis_values, q)
+        ids = bin_ids(basis_values, bins)
+        grouped = pd.DataFrame({"bin": ids, "error": errors}).groupby("bin")["error"].median()
+        corrections = {int(k): float(v) for k, v in grouped.items()}
+        for scale in BIN_CALIBRATION_SCALES:
+            calibration = {"bins": bins.tolist(), "corrections": corrections, "scale": scale, "basis": basis_name}
+            pred = apply_bin_calibration(base_pred, basis_values, plant, calibration)
+            score = candidate_score(metrics_dict(actual, pred, plant))
+            if score < best["score"]:
+                best = {"score": score, "calibration": calibration, "pred": pred}
+    return best["calibration"], best["pred"]
+
+
+def candidate_score(metrics):
+    mape = metrics["operational_mape"]
+    mape_score = float(mape) if pd.notna(mape) else float("inf")
+    return (mape_score, metrics["rmse"], -metrics["r2"])
 
 
 def unit_from_outage_col(col):
@@ -321,7 +389,10 @@ def forecast_24h(raw_df, planned):
             x_row = feature_row_from_history(hist, plant, meta["X_cols"], date_i, hour_i)
             delta = float(predict_delta(bundle["model"], bundle["x_scaler"], bundle["y_scaler"], x_row)[0])
             last_val = float(hist[target].iloc[-1])
-            base_pred = last_val + float(meta["best_shrinkage"]) * delta
+            base_pred = last_val + float(meta["best_shrinkage"]) * delta + float(meta.get("bias_correction_mw", 0.0))
+            calibration = meta.get("bin_calibration")
+            calibration_basis = [base_pred] if calibration and calibration.get("basis") == "base_pred" else [last_val]
+            base_pred = float(apply_bin_calibration([base_pred], calibration_basis, plant, calibration)[0])
             base_pred = float(np.clip(base_pred, last_val - float(meta["ramp_limit"]), last_val + float(meta["ramp_limit"])))
             base_pred = float(np.clip(base_pred, 0.0, CAPACITY_MW[plant] * 1.05))
 
@@ -364,36 +435,56 @@ def main():
         y_train = y_scaler.fit_transform(train_df[[y_col]].values.astype(np.float32))
         y_val_scaled = y_scaler.transform(val_df[[y_col]].values.astype(np.float32))
 
-        model = build_model(x_train.shape[1])
-        init_centers(model, x_train)
-        history = model.fit(
-            x_train,
-            y_train,
-            validation_data=(x_val, y_val_scaled),
-            epochs=EPOCHS,
-            batch_size=BATCH_SIZE,
-            verbose=0,
-            callbacks=[tf.keras.callbacks.EarlyStopping(monitor="val_loss", patience=10, restore_best_weights=True)],
-        )
-
-        val_delta_pred = y_scaler.inverse_transform(model.predict(x_val, verbose=0)).flatten()
-        test_delta_pred = y_scaler.inverse_transform(model.predict(x_test, verbose=0)).flatten()
         val_current = val_df[target].values.astype(float)
         test_current = test_df[target].values.astype(float)
         val_actual = val_df[f"{target}_tplus1"].values.astype(float)
         test_actual = test_df[f"{target}_tplus1"].values.astype(float)
 
         best = None
-        for shrinkage in SHRINKAGE_GRID:
-            val_pred_candidate = np.clip(val_current + shrinkage * val_delta_pred, 0.0, CAPACITY_MW[plant] * 1.05)
-            m = metrics_dict(val_actual, val_pred_candidate, plant)
-            score = (m["r2"], -m["operational_mape"], -m["rmse"])
-            if best is None or score > best["score"]:
-                best = {"shrinkage": shrinkage, "score": score}
+        for n_centers in SEARCH_CENTER_COUNTS:
+            for learning_rate in SEARCH_LEARNING_RATES:
+                tf.keras.backend.clear_session()
+                model = build_model(x_train.shape[1], n_centers=n_centers, learning_rate=learning_rate)
+                init_centers(model, x_train, n_centers=n_centers)
+                history = model.fit(
+                    x_train,
+                    y_train,
+                    validation_data=(x_val, y_val_scaled),
+                    epochs=EPOCHS,
+                    batch_size=BATCH_SIZE,
+                    verbose=0,
+                    callbacks=[tf.keras.callbacks.EarlyStopping(monitor="val_loss", patience=10, restore_best_weights=True)],
+                )
+                val_delta_pred = y_scaler.inverse_transform(model.predict(x_val, verbose=0)).flatten()
+                test_delta_pred = y_scaler.inverse_transform(model.predict(x_test, verbose=0)).flatten()
 
+                for shrinkage in SHRINKAGE_GRID:
+                    val_pred_candidate, bias = calibrated_level_predictions(val_current, val_delta_pred, val_actual, plant, shrinkage)
+                    val_m = metrics_dict(val_actual, val_pred_candidate, plant)
+                    score = candidate_score(val_m)
+                    if best is None or score < best["score"]:
+                        test_pred_candidate = apply_level_prediction(test_current, test_delta_pred, plant, shrinkage, bias)
+                        best = {
+                            "score": score,
+                            "model": model,
+                            "history": history,
+                            "n_centers": n_centers,
+                            "learning_rate": learning_rate,
+                            "shrinkage": shrinkage,
+                            "bias": bias,
+                            "val_pred": val_pred_candidate,
+                            "test_pred": test_pred_candidate,
+                        }
+
+        model = best["model"]
+        history = best["history"]
         shrinkage = best["shrinkage"]
-        val_pred = np.clip(val_current + shrinkage * val_delta_pred, 0.0, CAPACITY_MW[plant] * 1.05)
-        test_pred = np.clip(test_current + shrinkage * test_delta_pred, 0.0, CAPACITY_MW[plant] * 1.05)
+        bias = best["bias"]
+        val_pred = best["val_pred"]
+        test_pred = best["test_pred"]
+        bin_calibration, val_pred = tune_bin_calibration(plant, val_current, val_actual, val_pred)
+        test_basis = test_pred if bin_calibration and bin_calibration.get("basis") == "base_pred" else test_current
+        test_pred = apply_bin_calibration(test_pred, test_basis, plant, bin_calibration)
         val_metrics = metrics_dict(val_actual, val_pred, plant)
         test_metrics = metrics_dict(test_actual, test_pred, plant)
         limit = ramp_limit(train_df[target])
@@ -403,7 +494,11 @@ def main():
             "feature_count": len(x_cols),
             "rows_after_feature_prep": len(data),
             "epochs_ran": len(history.history["loss"]),
+            "selected_centers": best["n_centers"],
+            "selected_learning_rate": best["learning_rate"],
             "best_shrinkage": shrinkage,
+            "bias_correction_mw": bias,
+            "bin_calibration_enabled": bool(bin_calibration),
             "ramp_limit_mw": limit,
             "val_operational_mape": val_metrics["operational_mape"],
             "val_mae": val_metrics["mae"],
@@ -433,7 +528,12 @@ def main():
             "capacity_mw": CAPACITY_MW[plant],
             "operational_mape_threshold_mw": operational_threshold(plant),
             "best_shrinkage": shrinkage,
+            "bias_correction_mw": bias,
+            "bin_calibration": bin_calibration,
             "ramp_limit": limit,
+            "selected_centers": best["n_centers"],
+            "selected_learning_rate": best["learning_rate"],
+            "selection_metric": "lowest validation operational MAPE, then validation RMSE, then validation R2",
             "model_type": "RBFNN residual/delta model anchored to persistence",
         }, indent=2))
 
@@ -470,6 +570,40 @@ def main():
         comparison["original_summary_available"] = False
     comparison = comparison.fillna("not_available")
     comparison.to_excel(META_DIR / "optimized_vs_original_summary.xlsx", index=False)
+
+    benchmark_path = META_DIR / "benchmark_metrics" / "optimized_benchmark_validation_testing_metrics.xlsx"
+    if benchmark_path.exists():
+        benchmarks = pd.read_excel(benchmark_path)
+        comparison_rows = []
+        for _, rbfnn_row in summary.iterrows():
+            plant = rbfnn_row["plant"]
+            plant_bench = benchmarks[benchmarks["plant"] == plant].copy()
+            best_val = plant_bench.loc[plant_bench["val_operational_mape"].idxmin()]
+            best_test = plant_bench.loc[plant_bench["test_operational_mape"].idxmin()]
+            val_margin = float(best_val["val_operational_mape"] - rbfnn_row["val_operational_mape"])
+            test_margin = float(best_test["test_operational_mape"] - rbfnn_row["test_operational_mape"])
+            comparison_rows.append({
+                "plant": plant,
+                "rbfnn_val_operational_mape": rbfnn_row["val_operational_mape"],
+                "best_benchmark_val_model": best_val["model"],
+                "best_benchmark_val_operational_mape": best_val["val_operational_mape"],
+                "val_mape_margin": val_margin,
+                "rbfnn_test_operational_mape": rbfnn_row["test_operational_mape"],
+                "best_benchmark_test_model": best_test["model"],
+                "best_benchmark_test_operational_mape": best_test["test_operational_mape"],
+                "test_mape_margin": test_margin,
+                "rbfnn_wins_val_mape": val_margin > 0,
+                "rbfnn_wins_test_mape": test_margin > 0,
+                "rbfnn_wins_both": val_margin > 0 and test_margin > 0,
+            })
+        benchmark_comparison = pd.DataFrame(comparison_rows)
+        benchmark_comparison_path = META_DIR / "validation_testing_metrics" / "rbfnn_vs_benchmark_mape_comparison.xlsx"
+        benchmark_comparison.to_excel(benchmark_comparison_path, index=False)
+        print("\nRBFNN vs benchmark MAPE comparison:")
+        print(benchmark_comparison.to_string(index=False))
+        print("Saved:", benchmark_comparison_path)
+    else:
+        print("Benchmark metrics not found; run optimized_cell3_benchmark.py before final benchmark comparison.")
 
     print("\nOptimized RBFNN summary:")
     print(summary.to_string(index=False))
