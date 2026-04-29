@@ -12,11 +12,15 @@ Key improvements:
 
 import json
 import math
+import os
 import re
 import shutil
 import sys
 import warnings
 from pathlib import Path
+
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 
 import joblib
 import matplotlib.pyplot as plt
@@ -29,6 +33,7 @@ from sklearn.preprocessing import StandardScaler
 
 warnings.filterwarnings("ignore")
 np.random.seed(42)
+tf.get_logger().setLevel("ERROR")
 tf.random.set_seed(42)
 
 PROJECT_DIR = Path(__file__).resolve().parents[2]
@@ -602,8 +607,8 @@ def load_planned():
 
 
 def predict_delta(model, x_scaler, y_scaler, x_frame):
-    x_scaled = x_scaler.transform(x_frame.values.astype(np.float32))
-    y_scaled = model.predict(x_scaled, verbose=0)
+    x_scaled = x_scaler.transform(x_frame.values.astype(np.float32)).astype(np.float32)
+    y_scaled = model(x_scaled, training=False).numpy()
     return y_scaler.inverse_transform(y_scaled).flatten()
 
 
