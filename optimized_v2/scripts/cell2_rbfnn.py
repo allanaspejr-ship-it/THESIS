@@ -133,8 +133,13 @@ def atomic_save_keras_model(model, path):
     temp_path = path.with_name(f"{path.stem}.tmp{path.suffix}")
     if temp_path.exists():
         temp_path.unlink()
-    model.save(temp_path)
-    shutil.move(str(temp_path), str(path))
+    try:
+        model.save(temp_path)
+        shutil.move(str(temp_path), str(path))
+    except PermissionError:
+        if temp_path.exists():
+            temp_path.unlink()
+        model.save(path.with_suffix(".h5"))
 
 
 def format_excel(path):
@@ -156,9 +161,15 @@ def format_excel(path):
 
 def model_file(name):
     current = MODEL_DIR / name
+    current_h5 = current.with_suffix(".h5")
+    if current_h5.exists():
+        return current_h5
     if current.exists():
         return current
     legacy = LEGACY_MODEL_DIR / name
+    legacy_h5 = legacy.with_suffix(".h5")
+    if legacy_h5.exists():
+        return legacy_h5
     if legacy.exists():
         return legacy
     return current
@@ -357,7 +368,9 @@ def save_daily_metrics(part_df, y_true, y_pred, plant, path):
     temp["date"] = pd.to_datetime(temp["datetime"]).dt.date
     rows = []
     for date, group in temp.groupby("date"):
-        rows.append({"date": date, **metrics_dict(group["actual"], group["predicted"], plant), "samples": len(group)})
+        daily_metrics = metrics_dict(group["actual"], group["predicted"], plant)
+        daily_metrics.pop("r2", None)
+        rows.append({"date": date, **daily_metrics, "samples": len(group)})
     pd.DataFrame(rows).to_excel(path, index=False)
 
 
@@ -851,6 +864,9 @@ def evaluate_saved_models(raw_df):
                 "predicted_generation": float(predicted),
                 "model": "RBFNN",
             })
+
+        save_daily_metrics(val_df, val_actual, val_pred, plant, VALIDATION_METRICS_DIR / f"{plant}_validation_daily_metrics.xlsx")
+        save_daily_metrics(test_df, test_actual, test_pred, plant, TESTING_METRICS_DIR / f"{plant}_testing_daily_metrics.xlsx")
 
     metrics_path = OVERALL_METRICS_DIR / "rbfnn_validation_testing_metrics.xlsx"
     pd.DataFrame(summary_rows)[METRICS_COLUMNS].to_excel(metrics_path, index=False)

@@ -15,7 +15,7 @@ import pandas as pd
 PROJECT_DIR = Path(__file__).resolve().parents[2]
 VERSION_DIR = PROJECT_DIR / "optimized_v2"
 METRICS_DIR = VERSION_DIR / "metadata" / "overall_metrics"
-PLOT_DIR = PROJECT_DIR / "data" / "outputs" / "05_testing_plots" / "full_testing_split"
+PLOT_DIR = VERSION_DIR / "outputs" / "testing_plots" / "full_testing_split"
 
 PREDICTION_FILES = [
     METRICS_DIR / "rbfnn_testing_predictions.xlsx",

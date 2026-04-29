@@ -42,7 +42,6 @@ CONFIG = {
         "runtime": "cleaned_data",
         "outages": "outages_planning",
         "models": "models",
-        "metadata": "metadata",
     }
 }
 
@@ -440,7 +439,7 @@ def main():
 
     cleaned_xlsx = DIRS["runtime"] / "cleaned_hourly_data.xlsx"
     cleaned_parquet = DIRS["runtime"] / "cleaned_hourly_data.parquet"
-    meta_json = DIRS["metadata"] / "cell1_metadata.json"
+    meta_json = DIRS["runtime"] / "cell1_metadata.json"
 
     cleaned_output_df = prepare_cleaned_output(clean_df)
     cleaned_output_df.to_excel(cleaned_xlsx, index=False)
