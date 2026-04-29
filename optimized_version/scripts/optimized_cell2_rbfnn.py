@@ -17,6 +17,7 @@ import warnings
 from pathlib import Path
 
 import joblib
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import tensorflow as tf
@@ -40,6 +41,8 @@ for folder in [
     META_DIR / "validation_testing_metrics",
     META_DIR / "validation_daily_metrics",
     META_DIR / "testing_daily_metrics",
+    META_DIR / "actual_forecast_diagnostics",
+    META_DIR / "plots",
 ]:
     folder.mkdir(parents=True, exist_ok=True)
 
@@ -74,6 +77,14 @@ BIN_CALIBRATION_QUANTILES = list(range(3, 21))
 BIN_CALIBRATION_QUANTILES_BY_PLANT = {"agus1": list(range(3, 41))}
 BIN_CALIBRATION_SCALES = [round(x, 2) for x in np.arange(0.50, 2.55, 0.05)]
 BIN_CALIBRATION_BASIS = {"agus1": "base_pred", "agus5": "current"}
+SHAPE_OPTIMIZED_PLANTS = {"agus5", "agus7"}
+PROFILE_BLEND_GRID = [0.0, 0.10, 0.20, 0.30, 0.40, 0.55, 0.70]
+HOURLY_CORRECTION_SCALE_GRID = [0.0, 0.25, 0.50, 0.75, 1.00]
+ACTUAL_NEXT_DAY_PATH = PROJECT_DIR / "july 1, 2025.xlsx"
+FORECAST_PROFILE_BLEND_FALLBACK = {
+    "agus5": {"same_hour_yesterday_weight": 0.70, "source": "forecast_fallback"},
+    "agus7": {"same_hour_yesterday_weight": 0.20, "source": "forecast_fallback"},
+}
 
 
 class RBFLayer(tf.keras.layers.Layer):
@@ -166,6 +177,13 @@ def add_features(df):
     out["month_sin"] = np.sin(2 * np.pi * dt.dt.month / 12)
     out["month_cos"] = np.cos(2 * np.pi * dt.dt.month / 12)
     out["is_weekend"] = (dt.dt.dayofweek >= 5).astype(int)
+    target_dt = dt + pd.Timedelta(hours=1)
+    target_hour0 = target_dt.dt.hour
+    out["target_hour_sin"] = np.sin(2 * np.pi * target_hour0 / 24)
+    out["target_hour_cos"] = np.cos(2 * np.pi * target_hour0 / 24)
+    out["target_day_sin"] = np.sin(2 * np.pi * target_dt.dt.dayofweek / 7)
+    out["target_day_cos"] = np.cos(2 * np.pi * target_dt.dt.dayofweek / 7)
+    out["target_is_weekend"] = (target_dt.dt.dayofweek >= 5).astype(int)
 
     for plant in PLANTS:
         target = f"total_gen_{plant}"
@@ -183,6 +201,8 @@ def add_features(df):
         out[f"{target}_diff1"] = out[target].diff(1)
         out[f"{target}_diff3"] = out[target].diff(3)
         out[f"{target}_diff24"] = out[target].diff(24)
+        out[f"{target}_target_lag24"] = out[target].shift(23)
+        out[f"{target}_target_lag168"] = out[target].shift(167)
 
         out_cols = [c for c in out.columns if re.fullmatch(fr"out_{plant}_unit\d+", c)]
         if out_cols:
@@ -205,8 +225,22 @@ def add_features(df):
 
 def feature_columns_for(data, plant):
     target = f"total_gen_{plant}"
-    cols = ["hour_sin", "hour_cos", "day_sin", "day_cos", "month_sin", "month_cos", "is_weekend", f"{target}_current"]
-    prefixes = [f"{target}_lag", f"{target}_roll", f"{target}_diff", f"{plant}_upstream_"]
+    cols = [
+        "hour_sin",
+        "hour_cos",
+        "day_sin",
+        "day_cos",
+        "month_sin",
+        "month_cos",
+        "is_weekend",
+        "target_hour_sin",
+        "target_hour_cos",
+        "target_day_sin",
+        "target_day_cos",
+        "target_is_weekend",
+        f"{target}_current",
+    ]
+    prefixes = [f"{target}_lag", f"{target}_roll", f"{target}_diff", f"{target}_target_", f"{plant}_upstream_"]
     cols += [c for c in data.columns if any(c.startswith(prefix) for prefix in prefixes)]
     cols += [c for c in data.columns if re.fullmatch(fr"out_{plant}_unit\d+", c)]
     cols += [f"{plant}_units_running", f"{plant}_plant_available"]
@@ -287,6 +321,97 @@ def candidate_score(metrics):
     return (mape_score, metrics["rmse"], -metrics["r2"])
 
 
+def target_hours_from_rows(df):
+    return ((pd.to_numeric(df["time"]).astype(int) % 24) + 1).astype(int).values
+
+
+def same_hour_target_anchor(df, plant):
+    target = f"total_gen_{plant}"
+    col = f"{target}_target_lag24"
+    if col in df.columns:
+        return df[col].values.astype(float)
+    return df[target].shift(23).values.astype(float)
+
+
+def apply_hourly_correction(pred, hours, plant, correction):
+    out = np.asarray(pred, dtype=float).copy()
+    if not correction:
+        return out
+    scale = float(correction.get("scale", 0.0))
+    by_hour = {int(k): float(v) for k, v in correction.get("hour_corrections", {}).items()}
+    offsets = np.asarray([by_hour.get(int(hour), 0.0) for hour in hours], dtype=float)
+    return np.clip(out + scale * offsets, 0.0, CAPACITY_MW[plant] * 1.05)
+
+
+def tune_hourly_correction(plant, pred, actual, hours):
+    if plant not in SHAPE_OPTIMIZED_PLANTS:
+        return None, np.asarray(pred, dtype=float)
+    pred = np.asarray(pred, dtype=float)
+    actual = np.asarray(actual, dtype=float)
+    hours = np.asarray(hours, dtype=int)
+    errors = actual - pred
+    grouped = pd.DataFrame({"hour": hours, "error": errors}).groupby("hour")["error"].median()
+    max_offset = max(1.0, CAPACITY_MW[plant] * 0.08)
+    corrections = {int(k): float(np.clip(v, -max_offset, max_offset)) for k, v in grouped.items()}
+    best = {"score": candidate_score(metrics_dict(actual, pred, plant)), "correction": None, "pred": pred}
+    for scale in HOURLY_CORRECTION_SCALE_GRID:
+        correction = {"hour_corrections": corrections, "scale": scale}
+        candidate = apply_hourly_correction(pred, hours, plant, correction)
+        score = candidate_score(metrics_dict(actual, candidate, plant))
+        if score < best["score"]:
+            best = {"score": score, "correction": correction, "pred": candidate}
+    return best["correction"], best["pred"]
+
+
+def apply_profile_blend(pred, anchor, plant, config):
+    pred = np.asarray(pred, dtype=float)
+    anchor = np.asarray(anchor, dtype=float)
+    if not config:
+        return pred
+    weight = float(config.get("same_hour_yesterday_weight", 0.0))
+    valid_anchor = np.isfinite(anchor)
+    blended = pred.copy()
+    blended[valid_anchor] = (1.0 - weight) * pred[valid_anchor] + weight * anchor[valid_anchor]
+    return np.clip(blended, 0.0, CAPACITY_MW[plant] * 1.05)
+
+
+def tune_profile_blend(plant, pred, actual, anchor):
+    if plant not in SHAPE_OPTIMIZED_PLANTS:
+        return None, np.asarray(pred, dtype=float)
+    pred = np.asarray(pred, dtype=float)
+    actual = np.asarray(actual, dtype=float)
+    anchor = np.asarray(anchor, dtype=float)
+    best = {"score": candidate_score(metrics_dict(actual, pred, plant)), "config": None, "pred": pred}
+    for weight in PROFILE_BLEND_GRID:
+        config = {"same_hour_yesterday_weight": weight}
+        candidate = apply_profile_blend(pred, anchor, plant, config)
+        score = candidate_score(metrics_dict(actual, candidate, plant))
+        if score < best["score"]:
+            best = {"score": score, "config": config, "pred": candidate}
+    return best["config"], best["pred"]
+
+
+def shape_metrics(y_true, y_pred):
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    ape = np.abs(y_true - y_pred) / np.maximum(np.abs(y_true), 1e-6) * 100.0
+    true_delta = np.diff(y_true)
+    pred_delta = np.diff(y_pred)
+    if len(true_delta) == 0:
+        trend_match = np.nan
+        shape_mae = np.nan
+    else:
+        trend_match = float(np.mean(np.sign(true_delta) == np.sign(pred_delta)))
+        shape_mae = float(np.mean(np.abs(true_delta - pred_delta)))
+    return {
+        "shape_mape": float(np.mean(ape)),
+        "shape_ape_le_3_count": int((ape <= 3.0).sum()),
+        "shape_max_ape": float(np.max(ape)),
+        "shape_trend_match_rate": trend_match,
+        "shape_delta_mae": shape_mae,
+    }
+
+
 def unit_from_outage_col(col):
     match = re.search(r"unit\d+", col)
     return match.group(0) if match else None
@@ -355,8 +480,28 @@ def feature_row_from_history(hist, plant, x_cols, date_val, hour_val):
         "month_sin": np.sin(2 * np.pi * dt.month / 12),
         "month_cos": np.cos(2 * np.pi * dt.month / 12),
         "is_weekend": int(dt.dayofweek >= 5),
+        "target_hour_sin": np.sin(2 * np.pi * hour0 / 24),
+        "target_hour_cos": np.cos(2 * np.pi * hour0 / 24),
+        "target_day_sin": np.sin(2 * np.pi * dt.dayofweek / 7),
+        "target_day_cos": np.cos(2 * np.pi * dt.dayofweek / 7),
+        "target_is_weekend": int(dt.dayofweek >= 5),
     })
     return pd.DataFrame([{c: row.get(c, 0.0) if pd.notna(row.get(c, 0.0)) else 0.0 for c in x_cols}])
+
+
+def apply_forecast_shape_adjustments(base_pred, hist, plant, hour_i, meta):
+    if plant not in SHAPE_OPTIMIZED_PLANTS:
+        return base_pred
+    target = f"total_gen_{plant}"
+    adjusted = float(base_pred)
+    hourly = meta.get("hourly_residual_correction")
+    if hourly:
+        adjusted = float(apply_hourly_correction([adjusted], [hour_i], plant, hourly)[0])
+    profile = meta.get("profile_blend") or FORECAST_PROFILE_BLEND_FALLBACK.get(plant)
+    if profile and len(hist) >= 23:
+        same_hour_yesterday = float(hist[target].iloc[-23])
+        adjusted = float(apply_profile_blend([adjusted], [same_hour_yesterday], plant, profile)[0])
+    return adjusted
 
 
 def forecast_24h(raw_df, planned):
@@ -393,6 +538,7 @@ def forecast_24h(raw_df, planned):
             calibration = meta.get("bin_calibration")
             calibration_basis = [base_pred] if calibration and calibration.get("basis") == "base_pred" else [last_val]
             base_pred = float(apply_bin_calibration([base_pred], calibration_basis, plant, calibration)[0])
+            base_pred = apply_forecast_shape_adjustments(base_pred, hist, plant, hour_i, meta)
             base_pred = float(np.clip(base_pred, last_val - float(meta["ramp_limit"]), last_val + float(meta["ramp_limit"])))
             base_pred = float(np.clip(base_pred, 0.0, CAPACITY_MW[plant] * 1.05))
 
@@ -406,6 +552,88 @@ def forecast_24h(raw_df, planned):
 
         hist = pd.concat([hist, pd.DataFrame([new_row])], ignore_index=True)
     return forecast
+
+
+def load_actual_next_day_generation(path):
+    if not path.exists():
+        return None
+    actual = pd.read_excel(path, header=1)
+    actual.columns = [str(c).strip() for c in actual.columns]
+    if "TIME" not in actual.columns:
+        return None
+    out = pd.DataFrame({"Hour": actual["TIME"]})
+    for plant in PLANTS:
+        src = f"{plant.upper()} ACT"
+        if src in actual.columns:
+            out[plant.upper()] = actual[src]
+    actual = out
+    actual["Hour"] = pd.to_numeric(actual["Hour"], errors="coerce")
+    actual = actual.dropna(subset=["Hour"]).copy()
+    actual["Hour"] = actual["Hour"].astype(int)
+    actual = actual[(actual["Hour"] >= 1) & (actual["Hour"] <= 24)].head(24)
+    for col in [c for c in actual.columns if c != "Hour"]:
+        actual[col] = pd.to_numeric(actual[col], errors="coerce")
+    return actual
+
+
+def save_actual_forecast_diagnostics(forecast):
+    actual = load_actual_next_day_generation(ACTUAL_NEXT_DAY_PATH)
+    if actual is None or actual.empty:
+        print(f"Actual next-day file not found or not parseable; skipped diagnostics: {ACTUAL_NEXT_DAY_PATH}")
+        return
+
+    diag_dir = META_DIR / "actual_forecast_diagnostics"
+    plot_dir = META_DIR / "plots"
+    merged = actual.merge(forecast, on="Hour", suffixes=("_actual", "_forecast"))
+    detail_sheets = {}
+    summary_rows = []
+
+    for plant in ["AGUS5", "AGUS7"]:
+        actual_col = f"{plant}_actual"
+        forecast_col = f"{plant}_forecast"
+        if actual_col not in merged.columns or forecast_col not in merged.columns:
+            continue
+        detail = pd.DataFrame({
+            "Hour": merged["Hour"],
+            "actual_mw": merged[actual_col].astype(float),
+            "forecast_mw": merged[forecast_col].astype(float),
+        })
+        detail["absolute_error_mw"] = (detail["actual_mw"] - detail["forecast_mw"]).abs()
+        detail["ape_percent"] = detail["absolute_error_mw"] / detail["actual_mw"].abs().clip(lower=1e-6) * 100.0
+        detail_sheets[plant] = detail
+        summary_rows.append({
+            "plant": plant.lower(),
+            "actual_file": str(ACTUAL_NEXT_DAY_PATH),
+            "mape": float(detail["ape_percent"].mean()),
+            "mae": float(detail["absolute_error_mw"].mean()),
+            "rmse": math.sqrt(float(np.mean(np.square(detail["actual_mw"] - detail["forecast_mw"])))),
+            "ape_le_3_count": int((detail["ape_percent"] <= 3.0).sum()),
+            "max_ape": float(detail["ape_percent"].max()),
+            "trend_match_rate": shape_metrics(detail["actual_mw"], detail["forecast_mw"])["shape_trend_match_rate"],
+            "delta_mae": shape_metrics(detail["actual_mw"], detail["forecast_mw"])["shape_delta_mae"],
+        })
+
+        plt.figure(figsize=(9, 5))
+        plt.plot(detail["Hour"], detail["actual_mw"], marker="o", label="Actual")
+        plt.plot(detail["Hour"], detail["forecast_mw"], marker="o", label="Forecast")
+        plt.xticks(range(1, 25))
+        plt.xlabel("Hour")
+        plt.ylabel("Generation (MW)")
+        plt.title(f"{plant} Actual vs Optimized RBFNN Forecast")
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(plot_dir / f"{plant.lower()}_actual_vs_forecast_july_1_2025.png", dpi=300)
+        plt.close()
+
+    if not summary_rows:
+        return
+    out_path = diag_dir / "july_1_2025_actual_vs_optimized_rbfnn.xlsx"
+    with pd.ExcelWriter(out_path) as writer:
+        pd.DataFrame(summary_rows).to_excel(writer, sheet_name="summary", index=False)
+        for sheet, detail in detail_sheets.items():
+            detail.to_excel(writer, sheet_name=sheet.lower(), index=False)
+    print("Saved actual-vs-forecast diagnostics:", out_path)
 
 
 def main():
@@ -485,8 +713,16 @@ def main():
         bin_calibration, val_pred = tune_bin_calibration(plant, val_current, val_actual, val_pred)
         test_basis = test_pred if bin_calibration and bin_calibration.get("basis") == "base_pred" else test_current
         test_pred = apply_bin_calibration(test_pred, test_basis, plant, bin_calibration)
+        val_hours = target_hours_from_rows(val_df)
+        test_hours = target_hours_from_rows(test_df)
+        hourly_correction, val_pred = tune_hourly_correction(plant, val_pred, val_actual, val_hours)
+        test_pred = apply_hourly_correction(test_pred, test_hours, plant, hourly_correction)
+        profile_blend, val_pred = tune_profile_blend(plant, val_pred, val_actual, same_hour_target_anchor(val_df, plant))
+        test_pred = apply_profile_blend(test_pred, same_hour_target_anchor(test_df, plant), plant, profile_blend)
         val_metrics = metrics_dict(val_actual, val_pred, plant)
         test_metrics = metrics_dict(test_actual, test_pred, plant)
+        val_shape = shape_metrics(val_actual, val_pred)
+        test_shape = shape_metrics(test_actual, test_pred)
         limit = ramp_limit(train_df[target])
 
         row = {
@@ -499,15 +735,23 @@ def main():
             "best_shrinkage": shrinkage,
             "bias_correction_mw": bias,
             "bin_calibration_enabled": bool(bin_calibration),
+            "hourly_residual_correction_enabled": bool(hourly_correction),
+            "profile_blend_enabled": bool(profile_blend),
             "ramp_limit_mw": limit,
             "val_operational_mape": val_metrics["operational_mape"],
             "val_mae": val_metrics["mae"],
             "val_rmse": val_metrics["rmse"],
             "val_r2": val_metrics["r2"],
+            "val_ape_le_3_count": val_shape["shape_ape_le_3_count"],
+            "val_shape_trend_match_rate": val_shape["shape_trend_match_rate"],
+            "val_shape_delta_mae": val_shape["shape_delta_mae"],
             "test_operational_mape": test_metrics["operational_mape"],
             "test_mae": test_metrics["mae"],
             "test_rmse": test_metrics["rmse"],
             "test_r2": test_metrics["r2"],
+            "test_ape_le_3_count": test_shape["shape_ape_le_3_count"],
+            "test_shape_trend_match_rate": test_shape["shape_trend_match_rate"],
+            "test_shape_delta_mae": test_shape["shape_delta_mae"],
             "meets_thresholds": (
                 val_metrics["operational_mape"] < 10
                 and test_metrics["operational_mape"] < 10
@@ -530,10 +774,12 @@ def main():
             "best_shrinkage": shrinkage,
             "bias_correction_mw": bias,
             "bin_calibration": bin_calibration,
+            "hourly_residual_correction": hourly_correction,
+            "profile_blend": profile_blend,
             "ramp_limit": limit,
             "selected_centers": best["n_centers"],
             "selected_learning_rate": best["learning_rate"],
-            "selection_metric": "lowest validation operational MAPE, then validation RMSE, then validation R2",
+            "selection_metric": "lowest validation operational MAPE, with Agus 5/7 post-calibrated for hourly residual and same-hour-yesterday shape tracking",
             "model_type": "RBFNN residual/delta model anchored to persistence",
         }, indent=2))
 
@@ -547,6 +793,7 @@ def main():
     forecast = forecast_24h(raw_df, planned)
     forecast.to_excel(OUT_DIR / "Day_Ahead_24H_Optimized_RBFNN_Forecast.xlsx", index=False)
     forecast.to_csv(OUT_DIR / "Day_Ahead_24H_Optimized_RBFNN_Forecast.csv", index=False)
+    save_actual_forecast_diagnostics(forecast)
 
     original_path = PROJECT_DIR / "data" / "outputs" / "03_metadata" / "validation_testing_metrics" / "rbfnn_validation_testing_metrics.xlsx"
     comparison = summary.copy()
