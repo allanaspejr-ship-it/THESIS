@@ -5,6 +5,8 @@ __pycache__/
 data/
 outputs/
 models/
+benchmark/
+metadata/
 
 *.pkl
 *.joblib

@@ -1,0 +1,27 @@
+# HYDRO_FORECASTING Python dependencies
+# Install after cloning:
+#   python -m pip install --upgrade pip
+#   python -m pip install -r requirements.txt
+
+# Core data processing
+numpy
+pandas
+openpyxl
+pyarrow
+joblib
+
+# Machine learning and forecasting
+scikit-learn
+tensorflow
+xgboost
+
+# Plotting and reports
+matplotlib
+plotly
+
+# Streamlit dashboard
+streamlit
+
+# Notebook support for the .ipynb copies
+jupyter
+ipykernel
