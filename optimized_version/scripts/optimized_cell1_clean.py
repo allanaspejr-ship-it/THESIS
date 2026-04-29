@@ -17,10 +17,16 @@ PROJECT_DIR = Path(__file__).resolve().parents[2]
 OPT_DIR = PROJECT_DIR / "optimized_version"
 SRC_RUNTIME = PROJECT_DIR / "data" / "outputs" / "01_runtime_outputs"
 
+DATA_DIR = OPT_DIR / "data"
 OUT_DIR = OPT_DIR / "outputs"
+CLEANED_DATA_DIR = OUT_DIR / "cleaned_data"
+OUTAGES_DIR = OUT_DIR / "outages_planning"
 META_DIR = OPT_DIR / "metadata"
-OUT_DIR.mkdir(parents=True, exist_ok=True)
-META_DIR.mkdir(parents=True, exist_ok=True)
+OVERALL_METRICS_DIR = META_DIR / "overall_metrics"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+CLEANED_DATA_DIR.mkdir(parents=True, exist_ok=True)
+OUTAGES_DIR.mkdir(parents=True, exist_ok=True)
+OVERALL_METRICS_DIR.mkdir(parents=True, exist_ok=True)
 
 PLANTS = ["agus1", "agus2", "agus4", "agus5", "agus6", "agus7"]
 
@@ -48,9 +54,9 @@ def main():
     if df[numeric_cols].isna().any().any():
         raise ValueError("Cleaned data contains NaNs in numeric columns.")
 
-    clean_out = OUT_DIR / "cleaned_hourly_data.parquet"
-    clean_xlsx_out = OUT_DIR / "cleaned_hourly_data.xlsx"
-    planned_out = OUT_DIR / "Planned_Outages_Input.xlsx"
+    clean_out = CLEANED_DATA_DIR / "cleaned_hourly_data.parquet"
+    clean_xlsx_out = CLEANED_DATA_DIR / "cleaned_hourly_data.xlsx"
+    planned_out = OUTAGES_DIR / "Planned_Outages_Input.xlsx"
 
     df.to_parquet(clean_out, index=False)
     if clean_xlsx_src.exists():
@@ -71,7 +77,7 @@ def main():
             "The baseline cleaned outputs are not overwritten."
         ),
     }
-    (META_DIR / "optimized_cell1_metadata.json").write_text(json.dumps(metadata, indent=2))
+    (OVERALL_METRICS_DIR / "optimized_cell1_metadata.json").write_text(json.dumps(metadata, indent=2))
 
     print("Optimized Cell 1 complete")
     print("Saved:", clean_out)

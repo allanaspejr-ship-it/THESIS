@@ -13,6 +13,8 @@ Key improvements:
 import json
 import math
 import re
+import shutil
+import sys
 import warnings
 from pathlib import Path
 
@@ -32,22 +34,32 @@ tf.random.set_seed(42)
 PROJECT_DIR = Path(__file__).resolve().parents[2]
 OPT_DIR = PROJECT_DIR / "optimized_version"
 OUT_DIR = OPT_DIR / "outputs"
-MODEL_DIR = OPT_DIR / "models"
+CLEANED_DATA_DIR = OUT_DIR / "cleaned_data"
+OUTAGES_DIR = OUT_DIR / "outages_planning"
+RBFNN_FORECAST_DIR = OUT_DIR / "rbfnn_forecast"
+MODEL_DIR = OPT_DIR / "models" / "rbfnn"
 META_DIR = OPT_DIR / "metadata"
+VALIDATION_METRICS_DIR = META_DIR / "validation_metrics"
+TESTING_METRICS_DIR = META_DIR / "testing_metrics"
+OVERALL_METRICS_DIR = META_DIR / "overall_metrics"
+DIAGNOSTICS_DIR = OVERALL_METRICS_DIR / "actual_forecast_diagnostics"
+PLOTS_DIR = OVERALL_METRICS_DIR / "plots"
 
 for folder in [
-    OUT_DIR,
+    CLEANED_DATA_DIR,
+    OUTAGES_DIR,
+    RBFNN_FORECAST_DIR,
     MODEL_DIR,
-    META_DIR / "validation_testing_metrics",
-    META_DIR / "validation_daily_metrics",
-    META_DIR / "testing_daily_metrics",
-    META_DIR / "actual_forecast_diagnostics",
-    META_DIR / "plots",
+    VALIDATION_METRICS_DIR,
+    TESTING_METRICS_DIR,
+    OVERALL_METRICS_DIR,
+    DIAGNOSTICS_DIR,
+    PLOTS_DIR,
 ]:
     folder.mkdir(parents=True, exist_ok=True)
 
-CLEAN_PATH = OUT_DIR / "cleaned_hourly_data.parquet"
-PLANNED_PATH = OUT_DIR / "Planned_Outages_Input.xlsx"
+CLEAN_PATH = CLEANED_DATA_DIR / "cleaned_hourly_data.parquet"
+PLANNED_PATH = OUTAGES_DIR / "Planned_Outages_Input.xlsx"
 
 PLANTS = ["agus1", "agus2", "agus4", "agus5", "agus6", "agus7"]
 UPSTREAM_MAP = {"agus1": None, "agus2": "agus1", "agus4": "agus2", "agus5": "agus4", "agus6": "agus5", "agus7": "agus6"}
@@ -85,6 +97,14 @@ FORECAST_PROFILE_BLEND_FALLBACK = {
     "agus5": {"same_hour_yesterday_weight": 0.70, "source": "forecast_fallback"},
     "agus7": {"same_hour_yesterday_weight": 0.20, "source": "forecast_fallback"},
 }
+
+
+def atomic_save_keras_model(model, path):
+    temp_path = path.with_name(f"{path.stem}.tmp{path.suffix}")
+    if temp_path.exists():
+        temp_path.unlink()
+    model.save(temp_path)
+    shutil.move(str(temp_path), str(path))
 
 
 class RBFLayer(tf.keras.layers.Layer):
@@ -582,8 +602,8 @@ def save_actual_forecast_diagnostics(forecast):
         print(f"Actual next-day file not found or not parseable; skipped diagnostics: {ACTUAL_NEXT_DAY_PATH}")
         return
 
-    diag_dir = META_DIR / "actual_forecast_diagnostics"
-    plot_dir = META_DIR / "plots"
+    diag_dir = DIAGNOSTICS_DIR
+    plot_dir = PLOTS_DIR
     merged = actual.merge(forecast, on="Hour", suffixes=("_actual", "_forecast"))
     detail_sheets = {}
     summary_rows = []
@@ -636,7 +656,7 @@ def save_actual_forecast_diagnostics(forecast):
     print("Saved actual-vs-forecast diagnostics:", out_path)
 
 
-def main():
+def load_latest_inputs():
     if not CLEAN_PATH.exists() or not PLANNED_PATH.exists():
         raise FileNotFoundError("Run optimized_cell1_clean.py first.")
 
@@ -644,10 +664,35 @@ def main():
     raw_df["datetime"] = pd.to_datetime(raw_df["datetime"])
     raw_df = raw_df.sort_values("datetime").reset_index(drop=True)
     planned = load_planned()
+    return raw_df, planned
+
+
+def run_forecast_only():
+    raw_df, planned = load_latest_inputs()
+    forecast = forecast_24h(raw_df, planned)
+    xlsx_path = RBFNN_FORECAST_DIR / "Day_Ahead_24H_Optimized_RBFNN_Forecast.xlsx"
+    csv_path = RBFNN_FORECAST_DIR / "Day_Ahead_24H_Optimized_RBFNN_Forecast.csv"
+    forecast.to_excel(xlsx_path, index=False)
+    forecast.to_csv(csv_path, index=False)
+    save_actual_forecast_diagnostics(forecast)
+    print("Optimized RBFNN forecast complete")
+    print("Saved:", xlsx_path)
+    print("Saved:", csv_path)
+
+
+def run_training_and_forecast():
+    raw_df, planned = load_latest_inputs()
+    selected_plants = [arg.lower() for arg in sys.argv[sys.argv.index("--train") + 1:] if not arg.startswith("--")]
+    if selected_plants:
+        invalid = sorted(set(selected_plants) - set(PLANTS))
+        if invalid:
+            raise ValueError(f"Unknown plant(s): {invalid}. Valid plants: {PLANTS}")
     feat_df = add_features(raw_df)
     summary_rows = []
 
     for plant in PLANTS:
+        if selected_plants and plant not in selected_plants:
+            continue
         print(f"\n===== OPTIMIZED RBFNN {plant.upper()} =====")
         target = f"total_gen_{plant}"
         y_col = f"{target}_delta_tplus1"
@@ -761,7 +806,7 @@ def main():
         }
         summary_rows.append(row)
 
-        model.save(MODEL_DIR / f"rbfnn_{plant}.keras")
+        atomic_save_keras_model(model, MODEL_DIR / f"rbfnn_{plant}.keras")
         joblib.dump(x_scaler, MODEL_DIR / f"x_scaler_{plant}.pkl")
         joblib.dump(y_scaler, MODEL_DIR / f"y_scaler_{plant}.pkl")
         (MODEL_DIR / f"meta_{plant}.json").write_text(json.dumps({
@@ -783,17 +828,24 @@ def main():
             "model_type": "RBFNN residual/delta model anchored to persistence",
         }, indent=2))
 
-        save_daily_metrics(val_df, val_actual, val_pred, plant, META_DIR / "validation_daily_metrics" / f"{plant}_validation_daily_metrics.xlsx")
-        save_daily_metrics(test_df, test_actual, test_pred, plant, META_DIR / "testing_daily_metrics" / f"{plant}_testing_daily_metrics.xlsx")
+        save_daily_metrics(val_df, val_actual, val_pred, plant, VALIDATION_METRICS_DIR / f"{plant}_validation_daily_metrics.xlsx")
+        save_daily_metrics(test_df, test_actual, test_pred, plant, TESTING_METRICS_DIR / f"{plant}_testing_daily_metrics.xlsx")
         print(pd.DataFrame([row]).to_string(index=False))
 
     summary = pd.DataFrame(summary_rows)
-    summary_path = META_DIR / "validation_testing_metrics" / "optimized_rbfnn_validation_testing_metrics.xlsx"
+    summary_path = OVERALL_METRICS_DIR / "optimized_rbfnn_validation_testing_metrics.xlsx"
+    if selected_plants and summary_path.exists():
+        existing_summary = pd.read_excel(summary_path)
+        existing_summary = existing_summary[~existing_summary["plant"].isin(selected_plants)]
+        summary = pd.concat([existing_summary, summary], ignore_index=True)
+        summary["plant_order"] = summary["plant"].map({plant: idx for idx, plant in enumerate(PLANTS)})
+        summary = summary.sort_values("plant_order").drop(columns=["plant_order"]).reset_index(drop=True)
     summary.to_excel(summary_path, index=False)
-    forecast = forecast_24h(raw_df, planned)
-    forecast.to_excel(OUT_DIR / "Day_Ahead_24H_Optimized_RBFNN_Forecast.xlsx", index=False)
-    forecast.to_csv(OUT_DIR / "Day_Ahead_24H_Optimized_RBFNN_Forecast.csv", index=False)
-    save_actual_forecast_diagnostics(forecast)
+    if not selected_plants or all((MODEL_DIR / f"rbfnn_{plant}.keras").exists() for plant in PLANTS):
+        forecast = forecast_24h(raw_df, planned)
+        forecast.to_excel(RBFNN_FORECAST_DIR / "Day_Ahead_24H_Optimized_RBFNN_Forecast.xlsx", index=False)
+        forecast.to_csv(RBFNN_FORECAST_DIR / "Day_Ahead_24H_Optimized_RBFNN_Forecast.csv", index=False)
+        save_actual_forecast_diagnostics(forecast)
 
     original_path = PROJECT_DIR / "data" / "outputs" / "03_metadata" / "validation_testing_metrics" / "rbfnn_validation_testing_metrics.xlsx"
     comparison = summary.copy()
@@ -816,9 +868,9 @@ def main():
     else:
         comparison["original_summary_available"] = False
     comparison = comparison.fillna("not_available")
-    comparison.to_excel(META_DIR / "optimized_vs_original_summary.xlsx", index=False)
+    comparison.to_excel(OVERALL_METRICS_DIR / "optimized_vs_original_summary.xlsx", index=False)
 
-    benchmark_path = META_DIR / "benchmark_metrics" / "optimized_benchmark_validation_testing_metrics.xlsx"
+    benchmark_path = OVERALL_METRICS_DIR / "optimized_benchmark_validation_testing_metrics.xlsx"
     if benchmark_path.exists():
         benchmarks = pd.read_excel(benchmark_path)
         comparison_rows = []
@@ -844,7 +896,7 @@ def main():
                 "rbfnn_wins_both": val_margin > 0 and test_margin > 0,
             })
         benchmark_comparison = pd.DataFrame(comparison_rows)
-        benchmark_comparison_path = META_DIR / "validation_testing_metrics" / "rbfnn_vs_benchmark_mape_comparison.xlsx"
+        benchmark_comparison_path = OVERALL_METRICS_DIR / "rbfnn_vs_benchmark_mape_comparison.xlsx"
         benchmark_comparison.to_excel(benchmark_comparison_path, index=False)
         print("\nRBFNN vs benchmark MAPE comparison:")
         print(benchmark_comparison.to_string(index=False))
@@ -855,6 +907,13 @@ def main():
     print("\nOptimized RBFNN summary:")
     print(summary.to_string(index=False))
     print("Saved:", summary_path)
+
+
+def main():
+    if "--train" in sys.argv:
+        run_training_and_forecast()
+    else:
+        run_forecast_only()
 
 
 if __name__ == "__main__":

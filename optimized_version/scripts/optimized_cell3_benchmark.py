@@ -7,6 +7,7 @@ chronological split and operational MAPE definition as optimized Cell 2.
 
 import math
 import re
+import sys
 import warnings
 from pathlib import Path
 
@@ -22,13 +23,22 @@ warnings.filterwarnings("ignore", category=pd.errors.PerformanceWarning)
 PROJECT_DIR = Path(__file__).resolve().parents[2]
 OPT_DIR = PROJECT_DIR / "optimized_version"
 OUT_DIR = OPT_DIR / "outputs"
-BENCH_OUT_DIR = OUT_DIR / "benchmarks"
-MODEL_DIR = OPT_DIR / "models" / "benchmarks"
-META_DIR = OPT_DIR / "metadata" / "benchmark_metrics"
+CLEANED_DATA_DIR = OUT_DIR / "cleaned_data"
+OUTAGES_DIR = OUT_DIR / "outages_planning"
+BENCHMARK_DIR = OPT_DIR / "benchmark"
+BENCHMARK_OUTPUT_DIRS = {
+    "random_forest": BENCHMARK_DIR / "random_forest",
+    "xgboost": BENCHMARK_DIR / "xgboost",
+}
+MODEL_DIRS = {
+    "random_forest": OPT_DIR / "models" / "random_forest",
+    "xgboost": OPT_DIR / "models" / "xgboost",
+}
+META_DIR = OPT_DIR / "metadata" / "overall_metrics"
 
-BENCH_OUT_DIR.mkdir(parents=True, exist_ok=True)
-MODEL_DIR.mkdir(parents=True, exist_ok=True)
 META_DIR.mkdir(parents=True, exist_ok=True)
+for folder in [CLEANED_DATA_DIR, OUTAGES_DIR, *BENCHMARK_OUTPUT_DIRS.values(), *MODEL_DIRS.values()]:
+    folder.mkdir(parents=True, exist_ok=True)
 
 PLANTS = ["agus1", "agus2", "agus4", "agus5", "agus6", "agus7"]
 CAPACITY_MW = {"agus1": 80.0, "agus2": 180.0, "agus4": 158.1, "agus5": 55.0, "agus6": 219.0, "agus7": 54.0}
@@ -140,7 +150,7 @@ def availability_ratio(plant, baseline, planned):
 
 
 def load_planned():
-    planned_path = OUT_DIR / "Planned_Outages_Input.xlsx"
+    planned_path = OUTAGES_DIR / "Planned_Outages_Input.xlsx"
     planned = pd.read_excel(planned_path)
     planned.columns = [str(c).strip() for c in planned.columns]
     col_map = {c.lower(): c for c in planned.columns}
@@ -201,25 +211,56 @@ def forecast_benchmark_24h(raw_df, planned, models_by_plant):
     return forecast
 
 
-def save_forecast_outputs(forecast, safe_name):
-    xlsx_path = BENCH_OUT_DIR / f"Day_Ahead_24H_{safe_name}_Forecast.xlsx"
-    csv_path = BENCH_OUT_DIR / f"Day_Ahead_24H_{safe_name}_Forecast.csv"
+def save_forecast_outputs(forecast, model_key, safe_name):
+    out_dir = BENCHMARK_OUTPUT_DIRS[model_key]
+    xlsx_path = out_dir / f"Day_Ahead_24H_{safe_name}_Forecast.xlsx"
+    csv_path = out_dir / f"Day_Ahead_24H_{safe_name}_Forecast.csv"
     try:
         forecast.to_excel(xlsx_path, index=False)
     except PermissionError:
-        fallback_xlsx = BENCH_OUT_DIR / f"Day_Ahead_24H_{safe_name}_Forecast_regenerated.xlsx"
+        fallback_xlsx = out_dir / f"Day_Ahead_24H_{safe_name}_Forecast_regenerated.xlsx"
         forecast.to_excel(fallback_xlsx, index=False)
         print(f"Workbook locked, saved fallback: {fallback_xlsx}")
     forecast.to_csv(csv_path, index=False)
 
 
-def main():
-    clean_path = OUT_DIR / "cleaned_hourly_data.parquet"
+def load_latest_inputs():
+    clean_path = CLEANED_DATA_DIR / "cleaned_hourly_data.parquet"
     if not clean_path.exists():
         raise FileNotFoundError("Run optimized_cell1_clean.py first.")
     raw_df = pd.read_parquet(clean_path)
     raw_df["datetime"] = pd.to_datetime(raw_df["datetime"])
     raw_df = raw_df.sort_values("datetime").reset_index(drop=True)
+    planned = load_planned()
+    return raw_df, planned
+
+
+def load_saved_benchmark_models():
+    forecast_models = {"Random Forest": {}, "XGBoost": {}}
+    model_keys = {"Random Forest": "random_forest", "XGBoost": "xgboost"}
+    for name, model_key in model_keys.items():
+        for plant in PLANTS:
+            model_path = MODEL_DIRS[model_key] / f"{model_key}_{plant}.pkl"
+            if not model_path.exists():
+                raise FileNotFoundError(f"Missing saved {name} model: {model_path}. Run with --train first.")
+            forecast_models[name][plant] = joblib.load(model_path)
+    return forecast_models
+
+
+def run_forecast_only():
+    raw_df, planned = load_latest_inputs()
+    forecast_models = load_saved_benchmark_models()
+    for name, models_by_plant in forecast_models.items():
+        forecast = forecast_benchmark_24h(raw_df, planned, models_by_plant)
+        model_key = name.lower().replace(" ", "_")
+        safe_name = name.upper().replace(" ", "_")
+        save_forecast_outputs(forecast, model_key, safe_name)
+    print("Benchmark forecasts complete")
+    print("Saved benchmark forecasts:", BENCHMARK_DIR)
+
+
+def run_training_and_forecast():
+    raw_df, planned = load_latest_inputs()
     df = add_features(raw_df)
     rows = []
     forecast_models = {"Random Forest": {}, "XGBoost": {}}
@@ -265,21 +306,28 @@ def main():
                 "test_rmse": test_m["rmse"],
                 "test_r2": test_m["r2"],
             })
-            safe_name = name.lower().replace(" ", "_")
-            joblib.dump(model, MODEL_DIR / f"{safe_name}_{plant}.pkl")
+            model_key = name.lower().replace(" ", "_")
+            joblib.dump(model, MODEL_DIRS[model_key] / f"{model_key}_{plant}.pkl")
             forecast_models[name][plant] = model
 
     result = pd.DataFrame(rows)
     out_path = META_DIR / "optimized_benchmark_validation_testing_metrics.xlsx"
     result.to_excel(out_path, index=False)
-    planned = load_planned()
     for name, models_by_plant in forecast_models.items():
         forecast = forecast_benchmark_24h(raw_df, planned, models_by_plant)
+        model_key = name.lower().replace(" ", "_")
         safe_name = name.upper().replace(" ", "_")
-        save_forecast_outputs(forecast, safe_name)
+        save_forecast_outputs(forecast, model_key, safe_name)
     print(result.to_string(index=False))
     print("Saved:", out_path)
-    print("Saved benchmark forecasts:", BENCH_OUT_DIR)
+    print("Saved benchmark forecasts:", BENCHMARK_DIR)
+
+
+def main():
+    if "--train" in sys.argv:
+        run_training_and_forecast()
+    else:
+        run_forecast_only()
 
 
 if __name__ == "__main__":
