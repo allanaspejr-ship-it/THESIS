@@ -41,7 +41,6 @@ CONFIG = {
     "dirs": {
         "runtime": "cleaned_data",
         "outages": "outages_planning",
-        "models": "models",
     }
 }
 
