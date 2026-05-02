@@ -6,7 +6,6 @@ It does not delete or move benchmark, data, models, outputs, or scripts.
 """
 
 from pathlib import Path
-import json
 import math
 import warnings
 
@@ -51,7 +50,6 @@ MODEL_FILES = {
 
 FIGURE_DIRS = {
     "cleaned_profiles": THESIS_FIGURES_DIR / "cleaned_profiles",
-    "training_validation_loss": THESIS_FIGURES_DIR / "training_validation_loss",
     "testing_actual_vs_forecast": THESIS_FIGURES_DIR / "testing_actual_vs_forecast",
     "error_analysis": THESIS_FIGURES_DIR / "error_analysis",
     "benchmark_comparison": THESIS_FIGURES_DIR / "benchmark_comparison",
@@ -197,54 +195,6 @@ def generate_cleaned_profile_figures():
         plt.ylabel("Generation (MW)")
         plt.grid(True, alpha=0.25)
         save_figure(FIGURE_DIRS["cleaned_profiles"] / f"figure_4_{idx:02d}_{plant}_cleaned_profile.png")
-
-
-def find_training_history(plant):
-    candidates = [
-        BASE_DIR / "metadata" / "training_validation_loss" / f"{plant}_training_history.xlsx",
-        BASE_DIR / "metadata" / "training_validation_loss" / f"{plant}_training_history.csv",
-        BASE_DIR / "metadata" / "training_validation_loss" / f"{plant}_loss_history.xlsx",
-        BASE_DIR / "metadata" / "training_validation_loss" / f"{plant}_loss_history.csv",
-        BASE_DIR / "models" / "rbfnn" / f"history_{plant}.json",
-        BASE_DIR / "models" / "rbfnn" / f"{plant}_history.json",
-    ]
-    for path in candidates:
-        if not path.exists():
-            continue
-        if path.suffix.lower() == ".xlsx":
-            df = pd.read_excel(path)
-        elif path.suffix.lower() == ".csv":
-            df = pd.read_csv(path)
-        elif path.suffix.lower() == ".json":
-            data = json.loads(path.read_text(encoding="utf-8"))
-            history = data.get("history", data)
-            df = pd.DataFrame(history)
-        else:
-            continue
-        lower = {col.lower(): col for col in df.columns}
-        loss_col = lower.get("loss") or lower.get("training_loss") or lower.get("train_loss")
-        val_col = lower.get("val_loss") or lower.get("validation_loss")
-        if loss_col and val_col:
-            return df.rename(columns={loss_col: "loss", val_col: "val_loss"})
-    return None
-
-
-def generate_training_validation_loss_figures():
-    for offset, plant in enumerate(PLANTS, start=7):
-        history = find_training_history(plant)
-        if history is None:
-            print(f"WARNING: RBFNN training history missing for {plant}; skipping Figure 4.{offset}.")
-            continue
-        epochs = np.arange(1, len(history) + 1)
-        plt.figure(figsize=(8, 5))
-        plt.plot(epochs, history["loss"], label="Training Loss", linewidth=1.6)
-        plt.plot(epochs, history["val_loss"], label="Validation Loss", linewidth=1.6)
-        plt.title(f"Figure 4.{offset}: Training and Validation Loss - {PLANT_LABELS[plant]}")
-        plt.xlabel("Epoch")
-        plt.ylabel("Loss")
-        plt.grid(True, alpha=0.25)
-        plt.legend()
-        save_figure(FIGURE_DIRS["training_validation_loss"] / f"figure_4_{offset:02d}_{plant}_training_validation_loss.png")
 
 
 def generate_testing_actual_vs_forecast_figures():
@@ -424,7 +374,6 @@ def write_overall_comparison():
 def main():
     ensure_dirs()
     generate_cleaned_profile_figures()
-    generate_training_validation_loss_figures()
     generate_testing_actual_vs_forecast_figures()
     generate_error_analysis_figures()
     generate_benchmark_comparison_figures()
