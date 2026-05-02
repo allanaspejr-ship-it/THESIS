@@ -77,6 +77,13 @@ UNIT_CAPACITY = {
     "agus6": {"unit1": 34.5, "unit2": 34.5, "unit3": 50.0, "unit4": 50.0, "unit5": 50.0},
     "agus7": {"unit1": 27.0, "unit2": 27.0},
 }
+UNIT_FORECAST_COLUMNS = [
+    f"gen_{plant}_{unit}"
+    for plant in PLANTS
+    for unit in UNIT_CAPACITY[plant]
+]
+TOTAL_FORECAST_COLUMNS = [f"total_gen_{plant}" for plant in PLANTS]
+CASCADE_FORECAST_COLUMN = "total_cascade_generation"
 LAGS = [1, 2, 3, 6, 12, 24, 48, 72, 168]
 ROLL_WINDOWS = [3, 6, 12, 24, 48, 168]
 
@@ -227,6 +234,58 @@ def availability_ratio(plant, baseline, planned):
     return plan_cap / base_cap
 
 
+def distribute_to_units(plant, plant_forecast, status):
+    available_units = []
+    for unit, capacity in UNIT_CAPACITY[plant].items():
+        out_col = f"out_{plant}_{unit}"
+        if status.get(out_col, 1.0) > 0:
+            available_units.append((unit, capacity))
+
+    unit_values = {f"gen_{plant}_{unit}": 0.0 for unit in UNIT_CAPACITY[plant]}
+    if not available_units:
+        return unit_values
+
+    available_capacity = sum(capacity for _, capacity in available_units)
+    for unit, capacity in available_units:
+        unit_values[f"gen_{plant}_{unit}"] = float(plant_forecast) * capacity / available_capacity
+    return unit_values
+
+
+def empty_forecast_frame(planned):
+    forecast = pd.DataFrame({"Date": planned["Date"].dt.date, "Hour": planned["Hour"].astype(int)})
+    for col in UNIT_FORECAST_COLUMNS + TOTAL_FORECAST_COLUMNS:
+        forecast[col] = 0.0
+    forecast[CASCADE_FORECAST_COLUMN] = 0.0
+    return forecast
+
+
+def display_hour(hour):
+    hour0 = int(hour) - 1
+    return "00:00" if hour0 == 0 else f"{hour0}:00"
+
+
+def forecast_display_column(col):
+    unit_match = re.fullmatch(r"gen_agus(\d+)_(unit\d+)", col)
+    if unit_match:
+        plant_num, unit = unit_match.groups()
+        return f"Gen_Agus{plant_num}_Unit{unit.replace('unit', '', 1)}_MW"
+
+    total_match = re.fullmatch(r"total_gen_agus(\d+)", col)
+    if total_match:
+        return f"Total_Gen_Agus{total_match.group(1)}_MW"
+
+    if col == CASCADE_FORECAST_COLUMN:
+        return "Total_Cascade_Generation_MW"
+    return col
+
+
+def format_forecast_output(forecast):
+    formatted = forecast.copy()
+    formatted["Hour"] = formatted["Hour"].apply(display_hour)
+    formatted = formatted.rename(columns={col: forecast_display_column(col) for col in formatted.columns})
+    return formatted
+
+
 def load_planned():
     planned_path = OUTAGES_DIR / "Planned_Outages_Input.xlsx"
     planned = pd.read_excel(planned_path)
@@ -256,7 +315,7 @@ def feature_row_from_history(hist, plant, date_val, hour_val):
 
 
 def forecast_benchmark_24h(raw_df, planned, models_by_plant):
-    forecast = pd.DataFrame({"Date": planned["Date"].dt.date, "Hour": planned["Hour"].astype(int)})
+    forecast = empty_forecast_frame(planned)
     hist = raw_df.copy()
     baseline_status = {plant: latest_status(hist, plant) for plant in PLANTS}
 
@@ -278,30 +337,37 @@ def forecast_benchmark_24h(raw_df, planned, models_by_plant):
             pred = float(np.clip(pred, last_val - limit, last_val + limit))
             pred = float(np.clip(pred, 0.0, CAPACITY_MW[plant] * 1.05))
 
-            ratio = availability_ratio(plant, baseline_status[plant], planned_status(planned, step, plant))
+            p_status = planned_status(planned, step, plant)
+            ratio = availability_ratio(plant, baseline_status[plant], p_status)
             adjusted = float(np.clip(pred * ratio, 0.0, CAPACITY_MW[plant] * 1.05)) if ratio > 0 else 0.0
-            forecast.loc[step, plant.upper()] = adjusted
+            unit_values = distribute_to_units(plant, adjusted, p_status)
+            for unit_col, value in unit_values.items():
+                forecast.loc[step, unit_col] = value
+            forecast.loc[step, f"total_gen_{plant}"] = sum(unit_values.values())
             new_row[target] = pred
             for out_col, value in baseline_status[plant].items():
                 new_row[out_col] = value
 
         hist = pd.concat([hist, pd.DataFrame([new_row])], ignore_index=True)
-    return forecast
+        forecast.loc[step, CASCADE_FORECAST_COLUMN] = forecast.loc[step, TOTAL_FORECAST_COLUMNS].sum()
+    ordered_cols = ["Date", "Hour"] + UNIT_FORECAST_COLUMNS + TOTAL_FORECAST_COLUMNS + [CASCADE_FORECAST_COLUMN]
+    return forecast[ordered_cols]
 
 
 def save_forecast_outputs(forecast, model_key, safe_name):
     out_dir = BENCHMARK_OUTPUT_DIRS[model_key]
     xlsx_path = out_dir / f"Day_Ahead_24H_{safe_name}.xlsx"
     csv_path = out_dir / f"Day_Ahead_24H_{safe_name}.csv"
+    output_forecast = format_forecast_output(forecast)
     try:
-        forecast.to_excel(xlsx_path, index=False)
+        output_forecast.to_excel(xlsx_path, index=False)
         format_excel(xlsx_path)
     except PermissionError:
         fallback_xlsx = out_dir / f"Day_Ahead_24H_{safe_name}_regenerated.xlsx"
-        forecast.to_excel(fallback_xlsx, index=False)
+        output_forecast.to_excel(fallback_xlsx, index=False)
         format_excel(fallback_xlsx)
         print(f"Workbook locked, saved fallback: {fallback_xlsx}")
-    forecast.to_csv(csv_path, index=False)
+    output_forecast.to_csv(csv_path, index=False)
     print("Saved:", xlsx_path)
     print("Saved:", csv_path)
 

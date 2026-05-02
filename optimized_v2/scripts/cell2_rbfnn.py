@@ -107,6 +107,7 @@ UNIT_FORECAST_COLUMNS = [
     for unit in UNIT_CAPACITY[plant]
 ]
 TOTAL_FORECAST_COLUMNS = [f"total_gen_{plant}" for plant in PLANTS]
+CASCADE_FORECAST_COLUMN = "total_cascade_generation"
 
 LAGS = [1, 2, 3, 6, 12, 24, 48, 72, 168]
 ROLL_WINDOWS = [3, 6, 12, 24, 48, 168]
@@ -585,8 +586,35 @@ def empty_forecast_frame(planned):
     forecast = pd.DataFrame({"Date": planned["Date"].dt.date, "Hour": planned["Hour"].astype(int)})
     for col in UNIT_FORECAST_COLUMNS + TOTAL_FORECAST_COLUMNS:
         forecast[col] = 0.0
-    forecast["total_cascade_generation"] = 0.0
+    forecast[CASCADE_FORECAST_COLUMN] = 0.0
     return forecast
+
+
+def display_hour(hour):
+    hour0 = int(hour) - 1
+    return "00:00" if hour0 == 0 else f"{hour0}:00"
+
+
+def forecast_display_column(col):
+    unit_match = re.fullmatch(r"gen_agus(\d+)_(unit\d+)", col)
+    if unit_match:
+        plant_num, unit = unit_match.groups()
+        return f"Gen_Agus{plant_num}_Unit{unit.replace('unit', '', 1)}_MW"
+
+    total_match = re.fullmatch(r"total_gen_agus(\d+)", col)
+    if total_match:
+        return f"Total_Gen_Agus{total_match.group(1)}_MW"
+
+    if col == CASCADE_FORECAST_COLUMN:
+        return "Total_Cascade_Generation_MW"
+    return col
+
+
+def format_forecast_output(forecast):
+    formatted = forecast.copy()
+    formatted["Hour"] = formatted["Hour"].apply(display_hour)
+    formatted = formatted.rename(columns={col: forecast_display_column(col) for col in formatted.columns})
+    return formatted
 
 
 def ramp_limit(train_series):
@@ -699,8 +727,8 @@ def forecast_24h(raw_df, planned):
                 new_row[out_col] = value
 
         hist = pd.concat([hist, pd.DataFrame([new_row])], ignore_index=True)
-        forecast.loc[step, "total_cascade_generation"] = forecast.loc[step, TOTAL_FORECAST_COLUMNS].sum()
-    ordered_cols = ["Date", "Hour"] + UNIT_FORECAST_COLUMNS + TOTAL_FORECAST_COLUMNS + ["total_cascade_generation"]
+        forecast.loc[step, CASCADE_FORECAST_COLUMN] = forecast.loc[step, TOTAL_FORECAST_COLUMNS].sum()
+    ordered_cols = ["Date", "Hour"] + UNIT_FORECAST_COLUMNS + TOTAL_FORECAST_COLUMNS + [CASCADE_FORECAST_COLUMN]
     forecast = forecast[ordered_cols]
     return forecast
 
@@ -888,10 +916,11 @@ def run_forecast_only():
     raw_df, planned = load_latest_inputs()
     evaluate_saved_models(raw_df)
     forecast = forecast_24h(raw_df, planned)
+    output_forecast = format_forecast_output(forecast)
     xlsx_path = RBFNN_FORECAST_DIR / "Day_Ahead_24H_RBFNN_Forecast.xlsx"
     csv_path = RBFNN_FORECAST_DIR / "Day_Ahead_24H_RBFNN_Forecast.csv"
-    forecast.to_excel(xlsx_path, index=False)
-    forecast.to_csv(csv_path, index=False)
+    output_forecast.to_excel(xlsx_path, index=False)
+    output_forecast.to_csv(csv_path, index=False)
     format_excel(xlsx_path)
     print("Optimized RBFNN forecast complete")
     print("Saved:", xlsx_path)
@@ -1058,10 +1087,11 @@ def run_training_and_forecast():
     format_excel(testing_path)
     if not selected_plants or all(model_file(f"rbfnn_{plant}.keras").exists() for plant in PLANTS):
         forecast = forecast_24h(raw_df, planned)
+        output_forecast = format_forecast_output(forecast)
         forecast_xlsx = RBFNN_FORECAST_DIR / "Day_Ahead_24H_RBFNN_Forecast.xlsx"
         forecast_csv = RBFNN_FORECAST_DIR / "Day_Ahead_24H_RBFNN_Forecast.csv"
-        forecast.to_excel(forecast_xlsx, index=False)
-        forecast.to_csv(forecast_csv, index=False)
+        output_forecast.to_excel(forecast_xlsx, index=False)
+        output_forecast.to_csv(forecast_csv, index=False)
         format_excel(forecast_xlsx)
         print("Saved:", forecast_xlsx)
         print("Saved:", forecast_csv)
