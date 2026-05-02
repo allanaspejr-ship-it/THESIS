@@ -255,6 +255,11 @@ def prepare_cleaned_output(clean_df):
     return out
 
 
+def display_hour(timestamp):
+    hour = pd.Timestamp(timestamp).hour
+    return "00:00" if hour == 0 else f"{hour}:00"
+
+
 def format_excel(path):
     try:
         from openpyxl import load_workbook
@@ -496,8 +501,8 @@ def main():
     )
 
     planned = pd.DataFrame({
-        "Date": pd.to_datetime(future_idx.date),
-        "Hour": future_idx.hour + 1
+        "Date": future_idx.strftime("%Y-%m-%d"),
+        "Hour": [display_hour(ts) for ts in future_idx],
     })
 
     last_row = df_outage.iloc[-1]

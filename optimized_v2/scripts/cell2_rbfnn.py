@@ -595,6 +595,17 @@ def display_hour(hour):
     return "00:00" if hour0 == 0 else f"{hour0}:00"
 
 
+def parse_planned_hour(value):
+    if isinstance(value, str):
+        text = value.strip()
+        match = re.fullmatch(r"(\d{1,2})(?::00)?", text)
+        if match:
+            hour0 = int(match.group(1))
+            if 0 <= hour0 <= 23:
+                return hour0 + 1
+    return int(pd.to_numeric(value))
+
+
 def forecast_display_column(col):
     unit_match = re.fullmatch(r"gen_agus(\d+)_(unit\d+)", col)
     if unit_match:
@@ -628,7 +639,7 @@ def load_planned():
     col_map = {c.lower(): c for c in planned.columns}
     planned = planned.rename(columns={col_map["date"]: "Date", col_map["hour"]: "Hour"})
     planned["Date"] = pd.to_datetime(planned["Date"])
-    planned["Hour"] = pd.to_numeric(planned["Hour"]).astype(int)
+    planned["Hour"] = planned["Hour"].apply(parse_planned_hour).astype(int)
     for col in [c for c in planned.columns if re.fullmatch(r"out_agus[124567]_unit\d+", c)]:
         planned[col] = np.where(pd.to_numeric(planned[col], errors="coerce").fillna(1) > 0, 1, 0)
     return planned
