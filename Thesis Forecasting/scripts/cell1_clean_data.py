@@ -22,12 +22,12 @@ np.random.seed(42)
 # ============================================================
 
 PROJECT_DIR = Path(__file__).resolve().parents[2]
-VERSION_DIR = Path(__file__).resolve().parents[1]
-RAW_DATA_DIR = VERSION_DIR / "data"
+THESIS_DIR = Path(__file__).resolve().parents[1]
+RAW_DATA_DIR = THESIS_DIR / "data"
 
 CONFIG = {
     "input_file": RAW_DATA_DIR / "DATA(JAN2024-JUNE2025).xlsx",
-    "base_output_dir": VERSION_DIR / "outputs",
+    "base_output_dir": THESIS_DIR / "outputs",
 
     "plants": ["agus1", "agus2", "agus4", "agus5", "agus6", "agus7"],
 

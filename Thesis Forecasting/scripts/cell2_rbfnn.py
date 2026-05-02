@@ -37,8 +37,9 @@ tf.get_logger().setLevel("ERROR")
 tf.random.set_seed(42)
 
 PROJECT_DIR = Path(__file__).resolve().parents[2]
-OPT_DIR = PROJECT_DIR / "optimized_v2"
-LEGACY_OPT_DIR = PROJECT_DIR / "optimized_version"
+THESIS_DIR = Path(__file__).resolve().parents[1]
+OPT_DIR = THESIS_DIR
+LEGACY_OPT_DIR = PROJECT_DIR / "archive" / "optimized_version"
 OUT_DIR = OPT_DIR / "outputs"
 CLEANED_DATA_DIR = OUT_DIR / "cleaned_data"
 OUTAGES_DIR = OUT_DIR / "outages_planning"
@@ -193,7 +194,7 @@ def rebuild_datetime(df):
 
 
 def add_runtime_compatibility_columns(df):
-    # Saved optimized_v2 cleaned files use cleaned public names; legacy saved models may expect old feature names.
+    # Thesis Forecasting cleaned files use public names; legacy saved models may expect old feature names.
     out = df.copy()
     for plant in PLANTS:
         new_gate = f"tot_{plant}_gate"
@@ -828,7 +829,7 @@ def save_actual_forecast_diagnostics(forecast):
 
 def load_latest_inputs():
     if not CLEAN_PATH.exists() or not PLANNED_PATH.exists():
-        raise FileNotFoundError("Run optimized_v2/scripts/cell1_clean_data.py first.")
+        raise FileNotFoundError("Run Thesis Forecasting/scripts/cell1_clean_data.py first.")
 
     raw_df = pd.read_parquet(CLEAN_PATH)
     raw_df = add_runtime_compatibility_columns(rebuild_datetime(raw_df))

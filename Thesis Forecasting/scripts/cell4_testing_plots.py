@@ -13,9 +13,9 @@ import pandas as pd
 
 
 PROJECT_DIR = Path(__file__).resolve().parents[2]
-VERSION_DIR = PROJECT_DIR / "optimized_v2"
-METRICS_DIR = VERSION_DIR / "metadata" / "overall_metrics"
-PLOT_DIR = VERSION_DIR / "outputs" / "testing_plots" / "full_testing_split"
+THESIS_DIR = Path(__file__).resolve().parents[1]
+METRICS_DIR = THESIS_DIR / "metadata" / "overall_metrics"
+PLOT_DIR = THESIS_DIR / "outputs" / "testing_plots" / "full_testing_split"
 
 PREDICTION_FILES = [
     METRICS_DIR / "rbfnn_testing_predictions.xlsx",
@@ -45,7 +45,7 @@ def load_predictions():
         raise FileNotFoundError(
             "Missing testing prediction file(s):\n"
             + "\n".join(str(path) for path in missing)
-            + "\nRun optimized_v2/scripts/cell2_rbfnn.py --train and optimized_v2/scripts/cell3_benchmark.py --train first."
+            + "\nRun Thesis Forecasting/scripts/cell2_rbfnn.py --train and Thesis Forecasting/scripts/cell3_benchmark.py --train first."
         )
 
     frames = []
@@ -72,11 +72,7 @@ def plot_plant(combined, plant):
         print(f"Skipped {plant}: no testing predictions found.")
         return
 
-    actual = (
-        plant_df[["datetime", "actual_generation"]]
-        .drop_duplicates("datetime")
-        .sort_values("datetime")
-    )
+    actual = plant_df[["datetime", "actual_generation"]].drop_duplicates("datetime").sort_values("datetime")
     predicted = plant_df.pivot_table(
         index="datetime",
         columns="model",

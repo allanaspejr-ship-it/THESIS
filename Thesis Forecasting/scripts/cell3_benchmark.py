@@ -21,8 +21,9 @@ from xgboost import XGBRegressor
 warnings.filterwarnings("ignore", category=pd.errors.PerformanceWarning)
 
 PROJECT_DIR = Path(__file__).resolve().parents[2]
-OPT_DIR = PROJECT_DIR / "optimized_v2"
-LEGACY_OPT_DIR = PROJECT_DIR / "optimized_version"
+THESIS_DIR = Path(__file__).resolve().parents[1]
+OPT_DIR = THESIS_DIR
+LEGACY_OPT_DIR = PROJECT_DIR / "archive" / "optimized_version"
 OUT_DIR = OPT_DIR / "outputs"
 CLEANED_DATA_DIR = OUT_DIR / "cleaned_data"
 OUTAGES_DIR = OUT_DIR / "outages_planning"
@@ -139,7 +140,7 @@ def rebuild_datetime(df):
 
 
 def add_runtime_compatibility_columns(df):
-    # Keep optimized_v2 cleaned files public-facing while supporting models trained on old feature names.
+    # Keep Thesis Forecasting cleaned files public-facing while supporting models trained on old feature names.
     out = df.copy()
     for plant in PLANTS:
         new_gate = f"tot_{plant}_gate"
@@ -386,7 +387,7 @@ def save_forecast_outputs(forecast, model_key, safe_name):
 def load_latest_inputs():
     clean_path = CLEANED_DATA_DIR / "cleaned_hourly_data.parquet"
     if not clean_path.exists():
-        raise FileNotFoundError("Run optimized_v2/scripts/cell1_clean_data.py first.")
+        raise FileNotFoundError("Run Thesis Forecasting/scripts/cell1_clean_data.py first.")
     raw_df = pd.read_parquet(clean_path)
     raw_df = add_runtime_compatibility_columns(rebuild_datetime(raw_df))
     planned = load_planned()
