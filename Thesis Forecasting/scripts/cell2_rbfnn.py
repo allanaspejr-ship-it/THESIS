@@ -50,6 +50,7 @@ META_DIR = OPT_DIR / "metadata"
 VALIDATION_METRICS_DIR = META_DIR / "validation_metrics"
 TESTING_METRICS_DIR = META_DIR / "testing_metrics"
 OVERALL_METRICS_DIR = META_DIR / "overall_metrics"
+TRAINING_HISTORY_DIR = META_DIR / "training_validation_loss"
 DIAGNOSTICS_DIR = OVERALL_METRICS_DIR / "actual_forecast_diagnostics"
 PLOTS_DIR = OVERALL_METRICS_DIR / "plots"
 
@@ -61,6 +62,7 @@ for folder in [
     VALIDATION_METRICS_DIR,
     TESTING_METRICS_DIR,
     OVERALL_METRICS_DIR,
+    TRAINING_HISTORY_DIR,
     DIAGNOSTICS_DIR,
     PLOTS_DIR,
 ]:
@@ -164,6 +166,15 @@ def format_excel(path):
             max_len = max([len(header)] + [len(str(cell.value)) for cell in column_cells[1:80] if cell.value is not None])
             ws.column_dimensions[column_cells[0].column_letter].width = min(max(max_len + 2, 10), 34)
     wb.save(path)
+
+
+def save_training_history(history, plant):
+    history_df = pd.DataFrame(history.history)
+    history_df.insert(0, "epoch", np.arange(1, len(history_df) + 1))
+    history_path = TRAINING_HISTORY_DIR / f"{plant}_training_history.xlsx"
+    history_df.to_excel(history_path, index=False)
+    format_excel(history_path)
+    return history_path
 
 
 def model_file(name):
@@ -1060,6 +1071,7 @@ def run_training_and_forecast():
         atomic_save_keras_model(model, MODEL_DIR / f"rbfnn_{plant}.keras")
         joblib.dump(x_scaler, MODEL_DIR / f"x_scaler_{plant}.pkl")
         joblib.dump(y_scaler, MODEL_DIR / f"y_scaler_{plant}.pkl")
+        history_path = save_training_history(history, plant)
         (MODEL_DIR / f"meta_{plant}.json").write_text(json.dumps({
             "plant": plant,
             "target": target,
@@ -1081,6 +1093,7 @@ def run_training_and_forecast():
 
         save_daily_metrics(val_df, val_actual, val_pred, plant, VALIDATION_METRICS_DIR / f"{plant}_validation_daily_metrics.xlsx")
         save_daily_metrics(test_df, test_actual, test_pred, plant, TESTING_METRICS_DIR / f"{plant}_testing_daily_metrics.xlsx")
+        print("Saved:", history_path)
         print(pd.DataFrame([row]).to_string(index=False))
 
     summary = pd.DataFrame(summary_rows)[METRICS_COLUMNS]
