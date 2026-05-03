@@ -1,0 +1,680 @@
+HYDROPOWER FORECASTING SYSTEM USER GUIDE
+
+This guide is for Windows users who will run the hydropower forecasting system using VS Code.
+
+You do not need programming experience.
+
+Follow the steps slowly.
+Click what the guide says.
+Type the commands exactly.
+Press Enter after each command.
+
+
+====================================================
+1. TITLE
+====================================================
+
+HYDROPOWER FORECASTING SYSTEM USER GUIDE
+
+
+====================================================
+2. PROJECT OVERVIEW
+====================================================
+
+This system forecasts next-day hydropower generation for the Agus plants.
+
+This means the system uses past data to estimate how much power the Agus hydropower plants may generate tomorrow.
+
+The system uses AI.
+
+The main AI model is called:
+
+RBFNN
+
+RBFNN means Radial Basis Function Neural Network.
+
+You do not need to understand the math to use the system.
+
+The system can do these tasks:
+
+1. Clean the raw data.
+2. Train the AI model.
+3. Forecast hydropower generation.
+4. Generate graphs and results.
+5. Compare the AI model with benchmark models.
+
+Important folders:
+
+data
+- This is where you put the raw Excel data file.
+
+scripts
+- This contains the Python files that run the system.
+
+models
+- This stores trained AI model files.
+
+outputs
+- This stores cleaned data, outage files, and forecast results.
+
+metadata
+- This stores metrics and model information.
+
+benchmark
+- This stores Random Forest and XGBoost benchmark results.
+
+thesis_figures
+- This stores graphs and figures for the thesis.
+
+
+====================================================
+3. INSTALL REQUIRED SOFTWARE
+====================================================
+
+A. Install Python
+
+1. Open your web browser.
+2. Go to:
+
+https://www.python.org/downloads/
+
+3. Click Download Python.
+4. Wait for the installer to download.
+5. Open the installer.
+6. IMPORTANT: Check the box that says:
+
+Add Python to PATH
+
+7. Click Install Now.
+8. Wait for the installation to finish.
+9. Click Close.
+
+To check if Python is installed:
+
+1. Open VS Code later.
+2. Open the terminal.
+3. Type:
+
+python --version
+
+4. Press Enter.
+5. If you see a Python version, Python is installed.
+
+
+B. Install VS Code
+
+1. Open your web browser.
+2. Go to:
+
+https://code.visualstudio.com/
+
+3. Click Download for Windows.
+4. Wait for the installer to download.
+5. Open the installer.
+6. Click Next.
+7. Accept the agreement.
+8. Click Next.
+9. Click Install.
+10. Wait for the installation to finish.
+11. Open VS Code.
+
+
+C. Install Excel
+
+You need a program that can open Excel files.
+
+Use one of these:
+
+Microsoft Excel
+LibreOffice Calc
+
+If Microsoft Excel is already installed, you can use it.
+
+
+====================================================
+4. INSTALL VS CODE EXTENSIONS
+====================================================
+
+1. Open VS Code.
+2. Look at the left side of the screen.
+3. Click the Extensions icon.
+4. The Extensions icon looks like four small squares.
+5. In the search box, type:
+
+Python
+
+6. Click the Python extension by Microsoft.
+7. Click Install.
+8. In the search box, type:
+
+Pylance
+
+9. Click the Pylance extension by Microsoft.
+10. Click Install.
+
+Only these extensions are required:
+
+Python
+Pylance
+
+
+====================================================
+5. OPEN THE PROJECT
+====================================================
+
+1. Open VS Code.
+2. Click File.
+3. Click Open Folder.
+4. Find and select the folder:
+
+Thesis Forecasting
+
+5. Click Select Folder.
+6. Wait for VS Code to open the folder.
+
+After opening the folder, you should see folders like:
+
+data
+scripts
+models
+outputs
+metadata
+benchmark
+thesis_figures
+
+
+====================================================
+6. OPEN TERMINAL
+====================================================
+
+1. In VS Code, look at the top menu.
+2. Click Terminal.
+3. Click New Terminal.
+4. A terminal will open at the bottom of VS Code.
+
+This guide uses the terminal to run commands.
+
+When the guide says "type this", click inside the terminal first.
+
+Then type the command.
+
+Then press Enter.
+
+
+====================================================
+7. INSTALL REQUIRED LIBRARIES
+====================================================
+
+Libraries are extra tools that Python needs to run the forecasting system.
+
+1. Make sure the terminal is open.
+2. Click inside the terminal.
+3. Type this:
+
+python -m pip install --upgrade pip
+
+4. Press Enter.
+5. Wait until it finishes.
+
+Then install the required libraries.
+
+Type this:
+
+python -m pip install numpy pandas matplotlib openpyxl scikit-learn tensorflow xgboost pyarrow joblib
+
+Press Enter.
+
+Wait until it finishes.
+
+This may take several minutes.
+
+If there is a requirements.txt file, you can use this command instead:
+
+python -m pip install -r requirements.txt
+
+Press Enter.
+
+If the command says the file is missing, use the longer command above.
+
+
+====================================================
+8. ADD DATA FILE
+====================================================
+
+The system needs an Excel data file before it can run.
+
+1. Find your Excel data file.
+2. The expected file name is:
+
+DATA(JAN2024-JUNE2025).xlsx
+
+3. Copy the file.
+4. Open the project folder:
+
+Thesis Forecasting
+
+5. Open the folder:
+
+data
+
+6. Paste the Excel file inside:
+
+Thesis Forecasting/data/
+
+The final file location should be:
+
+Thesis Forecasting/data/DATA(JAN2024-JUNE2025).xlsx
+
+
+====================================================
+9. RUN THE SYSTEM (FULL PROCESS)
+====================================================
+
+Use this full process when running the system for the first time.
+
+Make sure VS Code has opened the folder:
+
+Thesis Forecasting
+
+Make sure the terminal is open.
+
+
+STEP 1: Clean Data
+
+1. Click inside the terminal.
+2. Type this:
+
+python scripts/cell1_clean_data.py
+
+3. Press Enter.
+4. Wait until it finishes.
+
+This step creates:
+
+cleaned data
+outage template
+
+Example outputs:
+
+cleaned_hourly_data.xlsx
+cleaned_hourly_data.parquet
+Planned_Outages_Input.xlsx
+
+
+STEP 2: Train AI Model
+
+1. Click inside the terminal.
+2. Type this:
+
+python scripts/cell2_rbfnn.py --train
+
+3. Press Enter.
+4. Wait until it finishes.
+
+This step will:
+
+train the AI model
+save model files
+create metrics
+create forecast outputs
+
+This may take time.
+
+
+STEP 3: Run Benchmark Models
+
+1. Click inside the terminal.
+2. Type this:
+
+python scripts/cell3_benchmark.py --train
+
+3. Press Enter.
+4. Wait until it finishes.
+
+This step runs comparison models.
+
+The benchmark models are:
+
+Random Forest
+XGBoost
+
+
+STEP 4: Generate Figures and Metrics
+
+1. Click inside the terminal.
+2. Type this:
+
+python scripts/cell4_generate_thesis_and_metrics.py
+
+3. Press Enter.
+4. Wait until it finishes.
+
+This step creates graphs and organized results.
+
+
+====================================================
+10. FORECAST ONLY (NO RETRAINING)
+====================================================
+
+Use this for daily forecasting.
+
+If models already exist, DO NOT retrain.
+
+Do not type --train for daily use.
+
+To forecast only:
+
+1. Click inside the terminal.
+2. Type this:
+
+python scripts/cell2_rbfnn.py
+
+3. Press Enter.
+4. Wait until it finishes.
+
+Optional benchmark forecast:
+
+1. Click inside the terminal.
+2. Type this:
+
+python scripts/cell3_benchmark.py
+
+3. Press Enter.
+4. Wait until it finishes.
+
+
+====================================================
+11. RETRAIN MODEL (WHEN NEEDED)
+====================================================
+
+Only retrain when needed.
+
+Retrain only if:
+
+new data was added
+model files were deleted
+accuracy needs improvement
+
+To retrain:
+
+1. Click inside the terminal.
+2. Type this:
+
+python scripts/cell2_rbfnn.py --train
+
+3. Press Enter.
+4. Wait until it finishes.
+
+Training may take longer than forecasting.
+
+For daily use, use forecast-only instead.
+
+
+====================================================
+12. EDIT PLANNED OUTAGE
+====================================================
+
+The planned outage file tells the system which units are ON or OFF.
+
+First, run Step 1 from the full process if the outage file does not exist yet.
+
+Open this file:
+
+outputs/outages_planning/Planned_Outages_Input.xlsx
+
+Steps:
+
+1. Open the outputs folder.
+2. Open the outages_planning folder.
+3. Open Planned_Outages_Input.xlsx.
+4. Edit the values.
+
+Use these values:
+
+1 = ON
+0 = OFF
+
+5. Save the Excel file.
+6. Close Excel.
+7. Go back to VS Code.
+8. Open the terminal.
+9. Run forecast again:
+
+python scripts/cell2_rbfnn.py
+
+10. Press Enter.
+
+Important:
+
+Always close Excel before running the script.
+
+
+====================================================
+13. WHERE TO FIND RESULTS
+====================================================
+
+Forecast results are here:
+
+outputs/rbfnn_forecast/
+
+Benchmark results are here:
+
+benchmark/random_forest/
+benchmark/xgboost/
+
+Figures are here:
+
+thesis_figures/
+
+Metrics are here:
+
+metadata/
+
+Cleaned data is usually here:
+
+outputs/cleaned_data/
+
+Planned outage file is usually here:
+
+outputs/outages_planning/
+
+
+====================================================
+14. UPDATE FIGURES
+====================================================
+
+Use this when you want to update thesis graphs and metrics.
+
+1. Open VS Code.
+2. Open the Thesis Forecasting folder.
+3. Open the terminal.
+4. Type this:
+
+python scripts/cell4_generate_thesis_and_metrics.py
+
+5. Press Enter.
+6. Wait until it finishes.
+
+This will overwrite old figures.
+
+It will not create duplicate copies.
+
+
+====================================================
+15. COMMON ERRORS (AND FIX)
+====================================================
+
+Error:
+
+python is not recognized
+
+Meaning:
+
+Windows cannot find Python.
+
+Fix:
+
+Reinstall Python.
+During installation, check:
+
+Add Python to PATH
+
+Then restart VS Code.
+
+
+Error:
+
+ModuleNotFoundError
+
+Example:
+
+No module named pandas
+
+Meaning:
+
+A required library is missing.
+
+Fix:
+
+Open the terminal and type:
+
+python -m pip install numpy pandas matplotlib openpyxl scikit-learn tensorflow xgboost pyarrow joblib
+
+Press Enter.
+
+
+Error:
+
+Excel file is open
+
+Meaning:
+
+Python cannot edit the Excel file because Excel is using it.
+
+Fix:
+
+Save the Excel file.
+Close Excel.
+Run the command again.
+
+
+Error:
+
+Missing file
+
+Meaning:
+
+The file is not in the correct folder.
+
+Fix:
+
+Check that the data file is inside:
+
+Thesis Forecasting/data/
+
+Check that the file name is:
+
+DATA(JAN2024-JUNE2025).xlsx
+
+
+Error:
+
+Missing cleaned data
+
+Meaning:
+
+The system needs cleaned data first.
+
+Fix:
+
+Run:
+
+python scripts/cell1_clean_data.py
+
+
+Error:
+
+Missing model files
+
+Meaning:
+
+The model has not been trained yet, or files were deleted.
+
+Fix:
+
+Run:
+
+python scripts/cell2_rbfnn.py --train
+
+
+====================================================
+16. DAILY USE WORKFLOW
+====================================================
+
+Use these steps for normal daily forecasting.
+
+1. Open VS Code.
+2. Click File.
+3. Click Open Folder.
+4. Select:
+
+Thesis Forecasting
+
+5. Click Terminal.
+6. Click New Terminal.
+7. Edit the outage file if needed:
+
+outputs/outages_planning/Planned_Outages_Input.xlsx
+
+8. Save the outage file.
+9. Close Excel.
+10. Go back to VS Code.
+11. Click inside the terminal.
+12. Type this:
+
+python scripts/cell2_rbfnn.py
+
+13. Press Enter.
+14. Wait until it finishes.
+15. Open the forecast Excel output in:
+
+outputs/rbfnn_forecast/
+
+
+====================================================
+17. IMPORTANT NOTES
+====================================================
+
+Do NOT delete folders.
+
+Do NOT move files.
+
+Do NOT rename files unless you know what you are doing.
+
+Always close Excel before running the scripts.
+
+Use forecast-only for daily use.
+
+Use training only when needed.
+
+Keep a backup copy of the raw Excel data file.
+
+Keep the data folder.
+
+Keep the scripts folder.
+
+Keep the models folder.
+
+Keep the outputs folder.
+
+Keep the metadata folder.
+
+Keep the benchmark folder.
+
+Keep the thesis_figures folder.
+
+The most common daily command is:
+
+python scripts/cell2_rbfnn.py
+
+If you follow the steps exactly, the system can be used even without programming experience.
