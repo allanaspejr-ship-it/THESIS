@@ -1,6 +1,7 @@
 # HYDRO_FORECASTING Python dependencies
-# Install after cloning:
-#   python -m pip install --upgrade pip
+# Recommended interpreter: 64-bit Python 3.11 on Windows.
+# Install:
+#   python -m pip install --upgrade pip setuptools wheel
 #   python -m pip install -r requirements.txt
 
 # Core data processing
@@ -19,7 +20,7 @@ xgboost
 matplotlib
 plotly
 
-# Streamlit dashboard
+# Streamlit dashboard in archive/streamlit_gui_app
 streamlit
 
 # Notebook support for the .ipynb copies

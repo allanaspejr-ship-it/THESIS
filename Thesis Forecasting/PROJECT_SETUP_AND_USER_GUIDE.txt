@@ -78,7 +78,7 @@ A. Install Python
 
 https://www.python.org/downloads/
 
-3. Click Download Python.
+3. Download the 64-bit Windows installer for Python 3.11.
 4. Wait for the installer to download.
 5. Open the installer.
 6. IMPORTANT: Check the box that says:
@@ -98,7 +98,11 @@ To check if Python is installed:
 python --version
 
 4. Press Enter.
-5. If you see a Python version, Python is installed.
+5. If you see Python 3.11, Python is installed.
+
+Important:
+
+Use 64-bit Python 3.11 on Windows.
 
 
 B. Install VS Code
@@ -157,6 +161,12 @@ Only these extensions are required:
 Python
 Pylance
 
+These extensions are also recommended:
+
+Jupyter
+Python Debugger
+YAML
+
 
 ====================================================
 5. OPEN THE PROJECT
@@ -181,6 +191,11 @@ outputs
 metadata
 benchmark
 thesis_figures
+
+Important:
+
+The requirements.txt file is in the main HYDRO_FORECASTING folder.
+That folder is one level above Thesis Forecasting.
 
 
 ====================================================
@@ -211,16 +226,16 @@ Libraries are extra tools that Python needs to run the forecasting system.
 2. Click inside the terminal.
 3. Type this:
 
-python -m pip install --upgrade pip
+python -m pip install --upgrade pip setuptools wheel
 
 4. Press Enter.
 5. Wait until it finishes.
 
 Then install the required libraries.
 
-Type this:
+If VS Code opened the Thesis Forecasting folder, type this:
 
-python -m pip install numpy pandas matplotlib openpyxl scikit-learn tensorflow xgboost pyarrow joblib
+python -m pip install -r ../requirements.txt
 
 Press Enter.
 
@@ -228,13 +243,17 @@ Wait until it finishes.
 
 This may take several minutes.
 
-If there is a requirements.txt file, you can use this command instead:
+If VS Code opened the main HYDRO_FORECASTING folder instead, use this command:
 
 python -m pip install -r requirements.txt
 
 Press Enter.
 
-If the command says the file is missing, use the longer command above.
+If the command says the file is missing, use this longer command:
+
+python -m pip install numpy pandas openpyxl pyarrow joblib scikit-learn tensorflow xgboost matplotlib plotly streamlit jupyter ipykernel
+
+Press Enter.
 
 
 ====================================================
@@ -524,6 +543,24 @@ Then restart VS Code.
 
 Error:
 
+Wrong Python version
+
+Meaning:
+
+The project should use 64-bit Python 3.11 on Windows.
+
+Fix:
+
+Install 64-bit Python 3.11.
+During installation, check:
+
+Add Python to PATH
+
+Then restart VS Code.
+
+
+Error:
+
 ModuleNotFoundError
 
 Example:
@@ -538,7 +575,19 @@ Fix:
 
 Open the terminal and type:
 
-python -m pip install numpy pandas matplotlib openpyxl scikit-learn tensorflow xgboost pyarrow joblib
+python -m pip install --upgrade pip setuptools wheel
+
+Press Enter.
+
+Then type:
+
+python -m pip install -r ../requirements.txt
+
+Press Enter.
+
+If the requirements command says the file is missing, type:
+
+python -m pip install numpy pandas openpyxl pyarrow joblib scikit-learn tensorflow xgboost matplotlib plotly streamlit jupyter ipykernel
 
 Press Enter.
 
