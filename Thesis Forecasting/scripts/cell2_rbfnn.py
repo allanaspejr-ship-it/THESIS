@@ -334,6 +334,15 @@ def add_features(df):
         out[f"{target}_target_lag24"] = out[target].shift(23)
         out[f"{target}_target_lag168"] = out[target].shift(167)
 
+        unit_gen_cols = [c for c in out.columns if re.fullmatch(fr"gen_{plant}_unit\d+", c)]
+        for unit_col in unit_gen_cols:
+            out[f"{unit_col}_current"] = out[unit_col]
+            total_safe = out[target].replace(0, np.nan)
+            out[f"{unit_col}_share_current"] = (out[unit_col] / total_safe).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+            for lag in LAGS:
+                out[f"{unit_col}_lag{lag}"] = out[unit_col].shift(lag)
+                out[f"{unit_col}_share_lag{lag}"] = out[f"{unit_col}_share_current"].shift(lag)
+
         out_cols = [c for c in out.columns if re.fullmatch(fr"out_{plant}_unit\d+", c)]
         if out_cols:
             out[f"{plant}_units_running"] = out[out_cols].sum(axis=1)
@@ -372,6 +381,10 @@ def feature_columns_for(data, plant):
     ]
     prefixes = [f"{target}_lag", f"{target}_roll", f"{target}_diff", f"{target}_target_", f"{plant}_upstream_"]
     cols += [c for c in data.columns if any(c.startswith(prefix) for prefix in prefixes)]
+    cols += [
+        c for c in data.columns
+        if re.fullmatch(fr"gen_{plant}_unit\d+_(current|lag\d+|share_current|share_lag\d+)", c)
+    ]
     cols += [c for c in data.columns if re.fullmatch(fr"out_{plant}_unit\d+", c)]
     cols += [f"{plant}_units_running", f"{plant}_plant_available"]
     cols += [c for c in data.columns if c.startswith(f"tot_{plant}") or c.startswith(f"elev_{plant}") or c.startswith(f"spill_{plant}")]
@@ -576,22 +589,151 @@ def availability_ratio(plant, baseline, planned):
     return plan_cap / base_cap
 
 
-def distribute_to_units(plant, plant_forecast, status):
-    # Unit-level forecast output honors the edited outage plan: status 0 gets 0 MW.
-    available_units = []
-    for unit, capacity in UNIT_CAPACITY[plant].items():
-        out_col = f"out_{plant}_{unit}"
-        if status.get(out_col, 1.0) > 0:
-            available_units.append((unit, capacity))
+def unit_generation_columns(plant):
+    return [f"gen_{plant}_{unit}" for unit in UNIT_CAPACITY[plant]]
 
-    if not available_units:
-        return {f"gen_{plant}_{unit}": 0.0 for unit in UNIT_CAPACITY[plant]}
 
-    available_capacity = sum(capacity for _, capacity in available_units)
-    unit_values = {f"gen_{plant}_{unit}": 0.0 for unit in UNIT_CAPACITY[plant]}
-    for unit, capacity in available_units:
-        unit_values[f"gen_{plant}_{unit}"] = float(plant_forecast) * capacity / available_capacity
+def unit_status_col(plant, unit):
+    return f"out_{plant}_{unit}"
+
+
+def available_capacity(plant, status):
+    return sum(
+        capacity
+        for unit, capacity in UNIT_CAPACITY[plant].items()
+        if status.get(unit_status_col(plant, unit), 1.0) > 0
+    )
+
+
+def _unit_share_frame(plant, hist):
+    unit_cols = unit_generation_columns(plant)
+    total = hist[f"total_gen_{plant}"].replace(0, np.nan)
+    shares = hist[unit_cols].clip(lower=0.0).div(total, axis=0)
+    return shares.replace([np.inf, -np.inf], np.nan)
+
+
+def learned_unit_weights(plant, hist, status, forecast_hour):
+    unit_cols = unit_generation_columns(plant)
+    available_cols = [
+        f"gen_{plant}_{unit}"
+        for unit in UNIT_CAPACITY[plant]
+        if status.get(unit_status_col(plant, unit), 1.0) > 0
+    ]
+    weights = pd.Series(0.0, index=unit_cols, dtype=float)
+    if not available_cols:
+        return weights
+
+    shares = _unit_share_frame(plant, hist)
+    recent = shares.tail(168)
+    components = []
+    component_weights = []
+
+    current = shares.iloc[-1][available_cols].dropna() if not shares.empty else pd.Series(dtype=float)
+    if not current.empty and current.sum() > 0:
+        components.append(current / current.sum())
+        component_weights.append(0.50)
+
+    median_recent = recent[available_cols].median(skipna=True).dropna()
+    if not median_recent.empty and median_recent.sum() > 0:
+        components.append(median_recent / median_recent.sum())
+        component_weights.append(0.35)
+
+    if "time" in hist.columns:
+        hour_series = pd.to_numeric(hist["time"], errors="coerce").astype("Int64")
+        same_hour = hist.loc[(hour_series == int(forecast_hour)).fillna(False)]
+        same_hour_recent = _unit_share_frame(plant, same_hour.tail(56)) if not same_hour.empty else pd.DataFrame()
+        same_hour_median = same_hour_recent[available_cols].median(skipna=True).dropna() if not same_hour_recent.empty else pd.Series(dtype=float)
+        if not same_hour_median.empty and same_hour_median.sum() > 0:
+            components.append(same_hour_median / same_hour_median.sum())
+            component_weights.append(0.15)
+
+    if components:
+        combined = sum(w * c.reindex(available_cols).fillna(0.0) for w, c in zip(component_weights, components))
+        combined = combined / combined.sum() if combined.sum() > 0 else combined
+    else:
+        capacity = pd.Series({f"gen_{plant}_{unit}": cap for unit, cap in UNIT_CAPACITY[plant].items()})
+        combined = capacity[available_cols] / capacity[available_cols].sum()
+
+    weights.loc[available_cols] = combined.reindex(available_cols).fillna(0.0)
+    if weights.sum() <= 0:
+        capacity = pd.Series({f"gen_{plant}_{unit}": cap for unit, cap in UNIT_CAPACITY[plant].items()})
+        weights.loc[available_cols] = capacity[available_cols] / capacity[available_cols].sum()
+    else:
+        weights = weights / weights.sum()
+    return weights
+
+
+def allocate_with_unit_caps(plant, total_generation, weights, status):
+    unit_values = {col: 0.0 for col in unit_generation_columns(plant)}
+    available_cols = [
+        f"gen_{plant}_{unit}"
+        for unit in UNIT_CAPACITY[plant]
+        if status.get(unit_status_col(plant, unit), 1.0) > 0
+    ]
+    if not available_cols:
+        return unit_values
+
+    caps = pd.Series({f"gen_{plant}_{unit}": cap for unit, cap in UNIT_CAPACITY[plant].items()}, dtype=float)
+    total = float(np.clip(total_generation, 0.0, caps[available_cols].sum()))
+    remaining = total
+    alloc = pd.Series(0.0, index=available_cols, dtype=float)
+    active = list(available_cols)
+    active_weights = weights.reindex(active).fillna(0.0)
+    if active_weights.sum() <= 0:
+        active_weights = caps[active] / caps[active].sum()
+
+    for _ in range(len(active) + 1):
+        if remaining <= 1e-9 or not active:
+            break
+        active_weights = active_weights / active_weights.sum() if active_weights.sum() > 0 else caps[active] / caps[active].sum()
+        proposal = active_weights * remaining
+        headroom = caps[active] - alloc[active]
+        capped = proposal >= headroom
+        alloc.loc[active] += np.minimum(proposal, headroom)
+        remaining = total - float(alloc.sum())
+        active = [col for col in active if not capped.get(col, False) and caps[col] - alloc[col] > 1e-9]
+        active_weights = weights.reindex(active).fillna(0.0)
+
+    if remaining > 1e-6:
+        headroom = (caps[available_cols] - alloc[available_cols]).clip(lower=0.0)
+        if headroom.sum() > 0:
+            alloc.loc[available_cols] += remaining * headroom / headroom.sum()
+
+    for col, value in alloc.items():
+        unit_values[col] = float(np.clip(value, 0.0, caps[col]))
     return unit_values
+
+
+def distribute_to_units(plant, plant_forecast, status, hist, forecast_hour):
+    weights = learned_unit_weights(plant, hist, status, forecast_hour)
+    return allocate_with_unit_caps(plant, plant_forecast, weights, status)
+
+
+def validate_and_fix_unit_forecast(forecast, planned):
+    for idx in forecast.index:
+        for plant in PLANTS:
+            unit_cols = unit_generation_columns(plant)
+            p_status = planned_status(planned, idx, plant)
+            for unit, capacity in UNIT_CAPACITY[plant].items():
+                col = f"gen_{plant}_{unit}"
+                if p_status.get(unit_status_col(plant, unit), 1.0) <= 0:
+                    forecast.loc[idx, col] = 0.0
+                forecast.loc[idx, col] = float(np.clip(forecast.loc[idx, col], 0.0, capacity))
+
+            active = [col for col in unit_cols if forecast.loc[idx, col] > 1e-6]
+            if len(active) > 1 and np.allclose(forecast.loc[idx, active].values, forecast.loc[idx, active].iloc[0], atol=1e-6):
+                warnings.warn(
+                    f"{plant} forecast row {idx + 1} has identical active unit generation; "
+                    "check whether historical unit data contains identical unit behavior.",
+                    RuntimeWarning,
+                )
+
+            total_col = f"total_gen_{plant}"
+            unit_sum = float(forecast.loc[idx, unit_cols].sum())
+            if not np.isclose(float(forecast.loc[idx, total_col]), unit_sum, atol=1e-6):
+                forecast.loc[idx, total_col] = unit_sum
+    forecast[CASCADE_FORECAST_COLUMN] = forecast[TOTAL_FORECAST_COLUMNS].sum(axis=1)
+    return forecast
 
 
 def empty_forecast_frame(planned):
@@ -740,20 +882,22 @@ def forecast_24h(raw_df, planned):
 
             p_status = planned_status(planned, step, plant)
             ratio = availability_ratio(plant, baseline_status[plant], p_status)
-            adjusted = float(np.clip(base_pred * ratio, 0.0, CAPACITY_MW[plant] * 1.05)) if ratio > 0 else 0.0
-            unit_values = distribute_to_units(plant, adjusted, p_status)
+            max_available = available_capacity(plant, p_status)
+            adjusted = float(np.clip(base_pred * ratio, 0.0, max_available)) if ratio > 0 else 0.0
+            unit_values = distribute_to_units(plant, adjusted, p_status, hist, hour_i)
             for unit_col, value in unit_values.items():
                 forecast.loc[step, unit_col] = value
+                new_row[unit_col] = value
             forecast.loc[step, f"total_gen_{plant}"] = sum(unit_values.values())
-            new_row[target] = base_pred
-            for out_col, value in baseline_status[plant].items():
+            new_row[target] = forecast.loc[step, f"total_gen_{plant}"]
+            for out_col, value in p_status.items():
                 new_row[out_col] = value
 
         hist = pd.concat([hist, pd.DataFrame([new_row])], ignore_index=True)
         forecast.loc[step, CASCADE_FORECAST_COLUMN] = forecast.loc[step, TOTAL_FORECAST_COLUMNS].sum()
     ordered_cols = ["Date", "Hour"] + UNIT_FORECAST_COLUMNS + TOTAL_FORECAST_COLUMNS + [CASCADE_FORECAST_COLUMN]
     forecast = forecast[ordered_cols]
-    return forecast
+    return validate_and_fix_unit_forecast(forecast, planned)
 
 
 def load_actual_next_day_generation(path):

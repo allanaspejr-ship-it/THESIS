@@ -87,6 +87,7 @@ TOTAL_FORECAST_COLUMNS = [f"total_gen_{plant}" for plant in PLANTS]
 CASCADE_FORECAST_COLUMN = "total_cascade_generation"
 LAGS = [1, 2, 3, 6, 12, 24, 48, 72, 168]
 ROLL_WINDOWS = [3, 6, 12, 24, 48, 168]
+MODEL_KEYS = {"Random Forest": "random_forest", "XGBoost": "xgboost"}
 
 
 def operational_threshold(plant):
@@ -162,6 +163,73 @@ def model_file(model_key, name):
     return current
 
 
+def align_features(X, model_features):
+    X = X.copy()
+    for col in model_features:
+        if col not in X.columns:
+            X[col] = 0
+    return X[model_features]
+
+
+def model_payload(model, model_feature_columns):
+    return {
+        "model": model,
+        "feature_columns": list(model_feature_columns),
+    }
+
+
+def unpack_model_payload(payload):
+    if isinstance(payload, dict) and "model" in payload:
+        return payload["model"], list(payload.get("feature_columns") or [])
+    feature_names = getattr(payload, "feature_names_in_", None)
+    model_features = list(feature_names) if feature_names is not None else []
+    return payload, model_features
+
+
+def save_model_payload(model_key, plant, model, model_feature_columns):
+    joblib.dump(
+        model_payload(model, model_feature_columns),
+        MODEL_DIRS[model_key] / f"{model_key}_{plant}.pkl",
+    )
+
+
+def make_benchmark_model(name):
+    if name == "Random Forest":
+        return RandomForestRegressor(n_estimators=400, min_samples_leaf=2, random_state=42, n_jobs=1)
+    if name == "XGBoost":
+        return XGBRegressor(
+            n_estimators=500,
+            learning_rate=0.03,
+            max_depth=4,
+            subsample=0.9,
+            colsample_bytree=0.9,
+            objective="reg:squarederror",
+            random_state=42,
+            n_jobs=1,
+        )
+    raise ValueError(f"Unsupported benchmark model: {name}")
+
+
+def train_benchmark_model(name, plant, train, x_cols, y_col):
+    model = make_benchmark_model(name)
+    X_train = train[x_cols].copy()
+    model_feature_columns = X_train.columns.tolist()
+    print(f"Training {name} benchmark for {plant}")
+    model.fit(X_train, train[y_col])
+    save_model_payload(MODEL_KEYS[name], plant, model, model_feature_columns)
+    return model_payload(model, model_feature_columns)
+
+
+def predict_aligned(model_info, X, plant):
+    model, model_feature_columns = unpack_model_payload(model_info)
+    if not model_feature_columns:
+        model_feature_columns = list(X.columns)
+    if set(X.columns) != set(model_feature_columns):
+        print("WARNING: Feature mismatch detected. Aligning features or retraining model.")
+    X_input = align_features(X.copy(), model_feature_columns)
+    return np.clip(model.predict(X_input), 0.0, CAPACITY_MW[plant] * 1.05)
+
+
 def add_features(df):
     out = df.copy()
     out["datetime"] = pd.to_datetime(out["datetime"])
@@ -181,6 +249,14 @@ def add_features(df):
             roll = out[target].rolling(window, min_periods=max(2, window // 2))
             out[f"{target}_rollmean{window}"] = roll.mean()
             out[f"{target}_rollstd{window}"] = roll.std().fillna(0.0)
+        unit_gen_cols = [c for c in out.columns if re.fullmatch(fr"gen_{plant}_unit\d+", c)]
+        for unit_col in unit_gen_cols:
+            out[f"{unit_col}_current"] = out[unit_col]
+            total_safe = out[target].replace(0, np.nan)
+            out[f"{unit_col}_share_current"] = (out[unit_col] / total_safe).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+            for lag in LAGS:
+                out[f"{unit_col}_lag{lag}"] = out[unit_col].shift(lag)
+                out[f"{unit_col}_share_lag{lag}"] = out[f"{unit_col}_share_current"].shift(lag)
         out_cols = [c for c in out.columns if re.fullmatch(fr"out_{plant}_unit\d+", c)]
         if out_cols:
             out[f"{plant}_units_running"] = out[out_cols].sum(axis=1)
@@ -191,6 +267,10 @@ def feature_cols(df, plant):
     target = f"total_gen_{plant}"
     cols = ["hour_sin", "hour_cos", "day_of_week", "month", f"{target}_current"]
     cols += [c for c in df.columns if c.startswith(f"{target}_lag") or c.startswith(f"{target}_roll")]
+    cols += [
+        c for c in df.columns
+        if re.fullmatch(fr"gen_{plant}_unit\d+_(current|lag\d+|share_current|share_lag\d+)", c)
+    ]
     cols += [c for c in df.columns if re.fullmatch(fr"out_{plant}_unit\d+", c)]
     cols += [f"{plant}_units_running"]
     return [c for c in dict.fromkeys(cols) if c in df.columns]
@@ -235,21 +315,132 @@ def availability_ratio(plant, baseline, planned):
     return plan_cap / base_cap
 
 
-def distribute_to_units(plant, plant_forecast, status):
-    available_units = []
-    for unit, capacity in UNIT_CAPACITY[plant].items():
-        out_col = f"out_{plant}_{unit}"
-        if status.get(out_col, 1.0) > 0:
-            available_units.append((unit, capacity))
+def unit_generation_columns(plant):
+    return [f"gen_{plant}_{unit}" for unit in UNIT_CAPACITY[plant]]
 
-    unit_values = {f"gen_{plant}_{unit}": 0.0 for unit in UNIT_CAPACITY[plant]}
-    if not available_units:
+
+def unit_status_col(plant, unit):
+    return f"out_{plant}_{unit}"
+
+
+def available_capacity(plant, status):
+    return sum(
+        capacity
+        for unit, capacity in UNIT_CAPACITY[plant].items()
+        if status.get(unit_status_col(plant, unit), 1.0) > 0
+    )
+
+
+def _unit_share_frame(plant, hist):
+    total = hist[f"total_gen_{plant}"].replace(0, np.nan)
+    shares = hist[unit_generation_columns(plant)].clip(lower=0.0).div(total, axis=0)
+    return shares.replace([np.inf, -np.inf], np.nan)
+
+
+def learned_unit_weights(plant, hist, status, forecast_hour):
+    unit_cols = unit_generation_columns(plant)
+    available_cols = [
+        f"gen_{plant}_{unit}"
+        for unit in UNIT_CAPACITY[plant]
+        if status.get(unit_status_col(plant, unit), 1.0) > 0
+    ]
+    weights = pd.Series(0.0, index=unit_cols, dtype=float)
+    if not available_cols:
+        return weights
+
+    shares = _unit_share_frame(plant, hist)
+    recent = shares.tail(168)
+    components = []
+    component_weights = []
+    current = shares.iloc[-1][available_cols].dropna() if not shares.empty else pd.Series(dtype=float)
+    if not current.empty and current.sum() > 0:
+        components.append(current / current.sum())
+        component_weights.append(0.50)
+    median_recent = recent[available_cols].median(skipna=True).dropna()
+    if not median_recent.empty and median_recent.sum() > 0:
+        components.append(median_recent / median_recent.sum())
+        component_weights.append(0.35)
+    if "time" in hist.columns:
+        hour_series = pd.to_numeric(hist["time"], errors="coerce").astype("Int64")
+        same_hour = hist.loc[(hour_series == int(forecast_hour)).fillna(False)]
+        same_hour_recent = _unit_share_frame(plant, same_hour.tail(56)) if not same_hour.empty else pd.DataFrame()
+        same_hour_median = same_hour_recent[available_cols].median(skipna=True).dropna() if not same_hour_recent.empty else pd.Series(dtype=float)
+        if not same_hour_median.empty and same_hour_median.sum() > 0:
+            components.append(same_hour_median / same_hour_median.sum())
+            component_weights.append(0.15)
+
+    if components:
+        combined = sum(w * c.reindex(available_cols).fillna(0.0) for w, c in zip(component_weights, components))
+        combined = combined / combined.sum() if combined.sum() > 0 else combined
+    else:
+        caps = pd.Series({f"gen_{plant}_{unit}": cap for unit, cap in UNIT_CAPACITY[plant].items()})
+        combined = caps[available_cols] / caps[available_cols].sum()
+    weights.loc[available_cols] = combined.reindex(available_cols).fillna(0.0)
+    return weights / weights.sum() if weights.sum() > 0 else weights
+
+
+def allocate_with_unit_caps(plant, total_generation, weights, status):
+    unit_values = {col: 0.0 for col in unit_generation_columns(plant)}
+    available_cols = [
+        f"gen_{plant}_{unit}"
+        for unit in UNIT_CAPACITY[plant]
+        if status.get(unit_status_col(plant, unit), 1.0) > 0
+    ]
+    if not available_cols:
         return unit_values
 
-    available_capacity = sum(capacity for _, capacity in available_units)
-    for unit, capacity in available_units:
-        unit_values[f"gen_{plant}_{unit}"] = float(plant_forecast) * capacity / available_capacity
+    caps = pd.Series({f"gen_{plant}_{unit}": cap for unit, cap in UNIT_CAPACITY[plant].items()}, dtype=float)
+    total = float(np.clip(total_generation, 0.0, caps[available_cols].sum()))
+    alloc = pd.Series(0.0, index=available_cols, dtype=float)
+    remaining = total
+    active = list(available_cols)
+    active_weights = weights.reindex(active).fillna(0.0)
+    if active_weights.sum() <= 0:
+        active_weights = caps[active] / caps[active].sum()
+    for _ in range(len(active) + 1):
+        if remaining <= 1e-9 or not active:
+            break
+        active_weights = active_weights / active_weights.sum() if active_weights.sum() > 0 else caps[active] / caps[active].sum()
+        proposal = active_weights * remaining
+        headroom = caps[active] - alloc[active]
+        capped = proposal >= headroom
+        alloc.loc[active] += np.minimum(proposal, headroom)
+        remaining = total - float(alloc.sum())
+        active = [col for col in active if not capped.get(col, False) and caps[col] - alloc[col] > 1e-9]
+        active_weights = weights.reindex(active).fillna(0.0)
+    for col, value in alloc.items():
+        unit_values[col] = float(np.clip(value, 0.0, caps[col]))
     return unit_values
+
+
+def distribute_to_units(plant, plant_forecast, status, hist, forecast_hour):
+    weights = learned_unit_weights(plant, hist, status, forecast_hour)
+    return allocate_with_unit_caps(plant, plant_forecast, weights, status)
+
+
+def validate_and_fix_unit_forecast(forecast, planned):
+    for idx in forecast.index:
+        for plant in PLANTS:
+            unit_cols = unit_generation_columns(plant)
+            p_status = planned_status(planned, idx, plant)
+            for unit, capacity in UNIT_CAPACITY[plant].items():
+                col = f"gen_{plant}_{unit}"
+                if p_status.get(unit_status_col(plant, unit), 1.0) <= 0:
+                    forecast.loc[idx, col] = 0.0
+                forecast.loc[idx, col] = float(np.clip(forecast.loc[idx, col], 0.0, capacity))
+            active = [col for col in unit_cols if forecast.loc[idx, col] > 1e-6]
+            if len(active) > 1 and np.allclose(forecast.loc[idx, active].values, forecast.loc[idx, active].iloc[0], atol=1e-6):
+                warnings.warn(
+                    f"{plant} forecast row {idx + 1} has identical active unit generation; "
+                    "check whether historical unit data contains identical unit behavior.",
+                    RuntimeWarning,
+                )
+            total_col = f"total_gen_{plant}"
+            unit_sum = float(forecast.loc[idx, unit_cols].sum())
+            if not np.isclose(float(forecast.loc[idx, total_col]), unit_sum, atol=1e-6):
+                forecast.loc[idx, total_col] = unit_sum
+    forecast[CASCADE_FORECAST_COLUMN] = forecast[TOTAL_FORECAST_COLUMNS].sum(axis=1)
+    return forecast
 
 
 def empty_forecast_frame(planned):
@@ -311,9 +502,9 @@ def load_planned():
     return planned
 
 
-def feature_row_from_history(hist, plant, date_val, hour_val):
+def feature_row_from_history(hist, plant, date_val, hour_val, model_features=None):
     hist_feat = add_features(hist.copy())
-    x_cols = feature_cols(hist_feat, plant)
+    x_cols = list(model_features) if model_features else feature_cols(hist_feat, plant)
     row = hist_feat.iloc[-1].to_dict()
     dt = pd.to_datetime(date_val) + pd.Timedelta(hours=int(hour_val) - 1)
     hour0 = int(hour_val) - 1
@@ -341,8 +532,11 @@ def forecast_benchmark_24h(raw_df, planned, models_by_plant):
 
         for plant in PLANTS:
             target = f"total_gen_{plant}"
-            x_row = feature_row_from_history(hist, plant, date_i, hour_i)
-            pred = float(models_by_plant[plant].predict(x_row)[0])
+            model, model_features = unpack_model_payload(models_by_plant[plant])
+            x_row = feature_row_from_history(hist, plant, date_i, hour_i, model_features)
+            if model_features:
+                x_row = align_features(x_row, model_features)
+            pred = float(model.predict(x_row)[0])
             last_val = float(hist[target].iloc[-1])
             diffs = hist[target].diff().abs().dropna()
             limit = float(max(1.0, diffs.quantile(0.98))) if not diffs.empty else 2.0
@@ -351,19 +545,21 @@ def forecast_benchmark_24h(raw_df, planned, models_by_plant):
 
             p_status = planned_status(planned, step, plant)
             ratio = availability_ratio(plant, baseline_status[plant], p_status)
-            adjusted = float(np.clip(pred * ratio, 0.0, CAPACITY_MW[plant] * 1.05)) if ratio > 0 else 0.0
-            unit_values = distribute_to_units(plant, adjusted, p_status)
+            max_available = available_capacity(plant, p_status)
+            adjusted = float(np.clip(pred * ratio, 0.0, max_available)) if ratio > 0 else 0.0
+            unit_values = distribute_to_units(plant, adjusted, p_status, hist, hour_i)
             for unit_col, value in unit_values.items():
                 forecast.loc[step, unit_col] = value
+                new_row[unit_col] = value
             forecast.loc[step, f"total_gen_{plant}"] = sum(unit_values.values())
-            new_row[target] = pred
-            for out_col, value in baseline_status[plant].items():
+            new_row[target] = forecast.loc[step, f"total_gen_{plant}"]
+            for out_col, value in p_status.items():
                 new_row[out_col] = value
 
         hist = pd.concat([hist, pd.DataFrame([new_row])], ignore_index=True)
         forecast.loc[step, CASCADE_FORECAST_COLUMN] = forecast.loc[step, TOTAL_FORECAST_COLUMNS].sum()
     ordered_cols = ["Date", "Hour"] + UNIT_FORECAST_COLUMNS + TOTAL_FORECAST_COLUMNS + [CASCADE_FORECAST_COLUMN]
-    return forecast[ordered_cols]
+    return validate_and_fix_unit_forecast(forecast[ordered_cols], planned)
 
 
 def save_forecast_outputs(forecast, model_key, safe_name):
@@ -396,14 +592,45 @@ def load_latest_inputs():
 
 def load_saved_benchmark_models():
     forecast_models = {"Random Forest": {}, "XGBoost": {}}
-    model_keys = {"Random Forest": "random_forest", "XGBoost": "xgboost"}
-    for name, model_key in model_keys.items():
+    for name, model_key in MODEL_KEYS.items():
         for plant in PLANTS:
-            model_path = MODEL_DIRS[model_key] / f"{model_key}_{plant}.pkl"
             model_path = model_file(model_key, f"{model_key}_{plant}.pkl")
             if not model_path.exists():
                 raise FileNotFoundError(f"Missing saved {name} model: {model_path}. Run with --train first.")
             forecast_models[name][plant] = joblib.load(model_path)
+    return forecast_models
+
+
+def load_or_train_benchmark_models(raw_df):
+    df = add_features(raw_df)
+    forecast_models = {"Random Forest": {}, "XGBoost": {}}
+
+    for plant in PLANTS:
+        target = f"total_gen_{plant}"
+        y_col = f"{target}_tplus1"
+        x_cols = feature_cols(df, plant)
+        work = df.dropna(subset=[y_col] + x_cols).copy()
+        train, _, _ = split(work)
+        current_features = train[x_cols].columns.tolist()
+
+        for name, model_key in MODEL_KEYS.items():
+            model_path = model_file(model_key, f"{model_key}_{plant}.pkl")
+            retrain_model = True
+            if model_path.exists():
+                saved_payload = joblib.load(model_path)
+                model, model_feature_columns = unpack_model_payload(saved_payload)
+                if model_feature_columns and set(current_features) == set(model_feature_columns):
+                    forecast_models[name][plant] = model_payload(model, model_feature_columns)
+                    retrain_model = False
+                    print(f"Loaded {name} model for {plant}")
+                else:
+                    print("WARNING: Feature mismatch detected. Aligning features or retraining model.")
+            else:
+                print(f"Missing saved {name} model for {plant}; training a new model.")
+
+            if retrain_model:
+                forecast_models[name][plant] = train_benchmark_model(name, plant, train, x_cols, y_col)
+
     return forecast_models
 
 
@@ -420,15 +647,16 @@ def save_saved_model_metrics_and_predictions(raw_df, forecast_models):
         _, val, test = split(work)
 
         for name, models_by_plant in forecast_models.items():
-            model = models_by_plant[plant]
-            val_pred = np.clip(model.predict(val[x_cols]), 0.0, CAPACITY_MW[plant] * 1.05)
-            test_pred = np.clip(model.predict(test[x_cols]), 0.0, CAPACITY_MW[plant] * 1.05)
+            model_info = models_by_plant[plant]
+            _, model_feature_columns = unpack_model_payload(model_info)
+            val_pred = predict_aligned(model_info, val[x_cols].copy(), plant)
+            test_pred = predict_aligned(model_info, test[x_cols].copy(), plant)
             val_m = metrics(val[y_col], val_pred, plant)
             test_m = metrics(test[y_col], test_pred, plant)
             rows.append({
                 "model": name,
                 "plant": plant,
-                "feature_count": len(x_cols),
+                "feature_count": len(model_feature_columns or x_cols),
                 "val_operational_mape": val_m["operational_mape"],
                 "val_mae": val_m["mae"],
                 "val_rmse": val_m["rmse"],
@@ -466,7 +694,7 @@ def save_saved_model_metrics_and_predictions(raw_df, forecast_models):
 
 def run_forecast_only():
     raw_df, planned = load_latest_inputs()
-    forecast_models = load_saved_benchmark_models()
+    forecast_models = load_or_train_benchmark_models(raw_df)
     save_saved_model_metrics_and_predictions(raw_df, forecast_models)
     for name, models_by_plant in forecast_models.items():
         forecast = forecast_benchmark_24h(raw_df, planned, models_by_plant)
@@ -491,31 +719,17 @@ def run_training_and_forecast():
         work = df.dropna(subset=[y_col] + x_cols).copy()
         train, val, test = split(work)
 
-        models = {
-            "Random Forest": RandomForestRegressor(n_estimators=400, min_samples_leaf=2, random_state=42, n_jobs=1),
-            "XGBoost": XGBRegressor(
-                n_estimators=500,
-                learning_rate=0.03,
-                max_depth=4,
-                subsample=0.9,
-                colsample_bytree=0.9,
-                objective="reg:squarederror",
-                random_state=42,
-                n_jobs=1,
-            ),
-        }
-
-        for name, model in models.items():
-            print(f"Training {name} benchmark for {plant}")
-            model.fit(train[x_cols], train[y_col])
-            val_pred = np.clip(model.predict(val[x_cols]), 0.0, CAPACITY_MW[plant] * 1.05)
-            test_pred = np.clip(model.predict(test[x_cols]), 0.0, CAPACITY_MW[plant] * 1.05)
+        for name in ["Random Forest", "XGBoost"]:
+            model_info = train_benchmark_model(name, plant, train, x_cols, y_col)
+            _, model_feature_columns = unpack_model_payload(model_info)
+            val_pred = predict_aligned(model_info, val[x_cols].copy(), plant)
+            test_pred = predict_aligned(model_info, test[x_cols].copy(), plant)
             val_m = metrics(val[y_col], val_pred, plant)
             test_m = metrics(test[y_col], test_pred, plant)
             rows.append({
                 "model": name,
                 "plant": plant,
-                "feature_count": len(x_cols),
+                "feature_count": len(model_feature_columns),
                 "val_operational_mape": val_m["operational_mape"],
                 "val_mae": val_m["mae"],
                 "val_rmse": val_m["rmse"],
@@ -536,9 +750,7 @@ def run_training_and_forecast():
                     "predicted_generation": float(predicted),
                     "model": name,
                 })
-            model_key = name.lower().replace(" ", "_")
-            joblib.dump(model, MODEL_DIRS[model_key] / f"{model_key}_{plant}.pkl")
-            forecast_models[name][plant] = model
+            forecast_models[name][plant] = model_info
 
     result = pd.DataFrame(rows)[METRICS_COLUMNS]
     rf_metrics_path = META_DIR / "random_forest_validation_testing_metrics.xlsx"
