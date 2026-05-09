@@ -733,7 +733,68 @@ def validate_and_fix_unit_forecast(forecast, planned):
             if not np.isclose(float(forecast.loc[idx, total_col]), unit_sum, atol=1e-6):
                 forecast.loc[idx, total_col] = unit_sum
     forecast[CASCADE_FORECAST_COLUMN] = forecast[TOTAL_FORECAST_COLUMNS].sum(axis=1)
+    validate_hourly_outage_effect(forecast, planned)
     return forecast
+
+
+def validate_hourly_outage_effect(forecast_df, outage_df):
+    warnings_found = 0
+    for idx in forecast_df.index:
+        for plant in PLANTS:
+            p_status = planned_status(outage_df, idx, plant)
+            unit_cols = unit_generation_columns(plant)
+            total_col = f"total_gen_{plant}"
+
+            for unit in UNIT_CAPACITY[plant]:
+                status_col = unit_status_col(plant, unit)
+                gen_col = f"gen_{plant}_{unit}"
+                status = p_status.get(status_col, 1.0)
+                generation = float(forecast_df.loc[idx, gen_col])
+                if status <= 0 and abs(generation) > 1e-6:
+                    warnings.warn(
+                        f"Outage validation: {gen_col} row {idx + 1} is {generation:.6f} MW "
+                        f"while {status_col}=0.",
+                        RuntimeWarning,
+                    )
+                    warnings_found += 1
+                if (
+                    idx > 0
+                    and planned_status(outage_df, idx - 1, plant).get(status_col, 1.0) <= 0
+                    and status > 0
+                    and generation <= 1e-6
+                    and float(forecast_df.loc[idx, total_col]) > 1e-6
+                ):
+                    warnings.warn(
+                        f"Outage validation: {gen_col} row {idx + 1} is still 0 MW after "
+                        f"{status_col} returned to 1; confirm this is allocation-driven.",
+                        RuntimeWarning,
+                    )
+                    warnings_found += 1
+
+            unit_sum = float(forecast_df.loc[idx, unit_cols].sum())
+            plant_total = float(forecast_df.loc[idx, total_col])
+            if not np.isclose(plant_total, unit_sum, atol=1e-6):
+                warnings.warn(
+                    f"Outage validation: {total_col} row {idx + 1} is {plant_total:.6f} MW, "
+                    f"but unit sum is {unit_sum:.6f} MW.",
+                    RuntimeWarning,
+                )
+                warnings_found += 1
+
+        cascade_total = float(forecast_df.loc[idx, CASCADE_FORECAST_COLUMN])
+        plant_sum = float(forecast_df.loc[idx, TOTAL_FORECAST_COLUMNS].sum())
+        if not np.isclose(cascade_total, plant_sum, atol=1e-6):
+            warnings.warn(
+                f"Outage validation: {CASCADE_FORECAST_COLUMN} row {idx + 1} is "
+                f"{cascade_total:.6f} MW, but plant sum is {plant_sum:.6f} MW.",
+                RuntimeWarning,
+            )
+            warnings_found += 1
+
+    if warnings_found:
+        print(f"Hourly outage validation completed with {warnings_found} warning(s).")
+    else:
+        print("Hourly outage validation passed.")
 
 
 def empty_forecast_frame(planned):
@@ -845,7 +906,6 @@ def apply_forecast_shape_adjustments(base_pred, hist, plant, hour_i, meta):
 def forecast_24h(raw_df, planned):
     forecast = empty_forecast_frame(planned)
     hist = raw_df.copy()
-    baseline_status = {plant: latest_status(hist, plant) for plant in PLANTS}
 
     loaded = {}
     for plant in PLANTS:
@@ -881,17 +941,14 @@ def forecast_24h(raw_df, planned):
             base_pred = float(np.clip(base_pred, 0.0, CAPACITY_MW[plant] * 1.05))
 
             p_status = planned_status(planned, step, plant)
-            ratio = availability_ratio(plant, baseline_status[plant], p_status)
             max_available = available_capacity(plant, p_status)
-            adjusted = float(np.clip(base_pred * ratio, 0.0, max_available)) if ratio > 0 else 0.0
+            adjusted = float(np.clip(base_pred, 0.0, max_available)) if max_available > 0 else 0.0
             unit_values = distribute_to_units(plant, adjusted, p_status, hist, hour_i)
             for unit_col, value in unit_values.items():
                 forecast.loc[step, unit_col] = value
                 new_row[unit_col] = value
             forecast.loc[step, f"total_gen_{plant}"] = sum(unit_values.values())
             new_row[target] = forecast.loc[step, f"total_gen_{plant}"]
-            for out_col, value in p_status.items():
-                new_row[out_col] = value
 
         hist = pd.concat([hist, pd.DataFrame([new_row])], ignore_index=True)
         forecast.loc[step, CASCADE_FORECAST_COLUMN] = forecast.loc[step, TOTAL_FORECAST_COLUMNS].sum()

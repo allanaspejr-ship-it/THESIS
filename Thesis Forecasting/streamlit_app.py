@@ -1000,7 +1000,13 @@ def planned_outage_page() -> None:
         if st.button("Forecast Day-Ahead", width="stretch"):
             with st.spinner("Running day-ahead RBFNN forecast..."):
                 try:
+                    save_outage_plan(edited)
+                    st.cache_data.clear()
+                    load_outage_plan(modified_ns(OUTAGE_PLAN_PATH))
                     show_script_result(run_script(RBFNN_SCRIPT), "Day-ahead forecast")
+                    st.cache_data.clear()
+                    load_forecast(modified_ns(FORECAST_EXCEL))
+                    st.success("Forecast updated using the saved hourly outage plan.")
                 except Exception as exc:
                     st.error(str(exc))
     with button_cols[2]:
