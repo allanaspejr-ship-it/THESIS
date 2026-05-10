@@ -1,0 +1,749 @@
+PANEL DEFENSE Q&A SCRIPT
+Topic: AI-Based Short-Term Generation Forecasting of Cascaded Hydroelectric Power Plants
+Coverage: Cell 1 data cleaning up to Cell 2 RBFNN model training, validation, testing, and day-ahead forecasting
+Main manuscript file checked: main.pdf
+Main code files checked:
+- Thesis Forecasting/scripts/cell1_clean_data.py
+- Thesis Forecasting/scripts/cell2_rbfnn.py
+- Thesis Forecasting/metadata/overall_metrics/rbfnn_validation_testing_metrics.xlsx
+- Thesis Forecasting/metadata/overall_comparison/*.xlsx
+
+SHORT OPENING SCRIPT
+
+Good day, panelists. Our study is titled "AI-Based Short-Term Generation Forecasting of Cascaded Hydroelectric Power Plants." The main problem addressed is the difficulty of preparing reliable day-ahead generation nominations for the Agus hydropower cascade because plant output is affected by hydrologic conditions, upstream and downstream dependencies, gate operations, reservoir elevation, and unit availability.
+
+From Cell 1 to Cell 2, our workflow first cleans and standardizes the raw operational data, then trains and evaluates one Radial Basis Function Neural Network, or RBFNN, per Agus plant. The model predicts the next-hour change in generation rather than directly predicting generation level. This residual or delta approach keeps the forecast anchored to the current operating condition and makes the short-term forecast more stable.
+
+The cleaned dataset contains 13,128 hourly records and 55 columns, ending at 2025-06-30 23:00:00. The model uses a chronological split: 70 percent training, 15 percent validation, and 15 percent testing. The final RBFNN achieved an average testing MAPE of 2.519 percent, MAE of 1.355 MW, RMSE of 3.575 MW, and R2 of 0.925. These results show that the model gives accurate short-term forecasts and outperforms the Random Forest and XGBoost benchmark models in the final testing period.
+
+
+SECTION 1: CELL 1 DATA CLEANING QUESTIONS
+
+Q1. What is the purpose of Cell 1?
+A. Cell 1 prepares the raw Excel data for modeling. It loads the raw workbook, fixes the multi-row header, standardizes column names, converts date and time into hourly timestamps, cleans generation and hydrological variables, imputes missing values, recalculates plant totals, converts unit outage states into binary indicators, resamples the dataset hourly, and saves the cleaned dataset for Cell 2.
+
+Q2. Why was data cleaning necessary?
+A. The raw data came from operational records, so it contained multi-row headers, mixed column naming, possible missing values, near-zero values, short zero runs, spikes, and inconsistent numeric formats. If these issues were not corrected, the model could learn noise instead of real generation behavior.
+
+Q3. What was the raw data source?
+A. The code expects the raw Excel workbook inside Thesis Forecasting/data, specifically DATA(JAN2024-JUNE2025).xlsx. If that exact file is not found, the script uses the first non-temporary Excel file in that folder.
+
+Q4. What plants were included?
+A. The study included Agus 1, Agus 2, Agus 4, Agus 5, Agus 6, and Agus 7. Agus 3 is not included in the modeled cascade because the available dataset and operating scope used in the project cover those six plants.
+
+Q5. What is the final cleaned dataset size?
+A. The cleaned dataset contains 13,128 hourly rows and 55 columns. Its latest timestamp is 2025-06-30 23:00:00.
+
+Q6. Why did you convert the data to hourly format?
+A. The study is for short-term day-ahead generation forecasting. Hourly resolution matches the 24-hour forecast horizon and allows the model to learn hourly operating patterns, daily cycles, and changes in generation from one hour to the next.
+
+Q7. Why did the cleaned public files omit datetime?
+A. The cleaned Excel and Parquet outputs omit datetime for public-facing consistency, but Cell 2 rebuilds datetime from date and time. This avoids redundancy while preserving the information needed for chronological splitting and feature engineering.
+
+Q8. How was datetime rebuilt?
+A. Date is converted to a date object, time is converted to an integer hour, and datetime is computed as date plus time minus 1 hour. For example, time 1 corresponds to 00:00, and time 24 corresponds to 23:00.
+
+Q9. Why did you flatten a three-row header?
+A. The raw Excel file used multi-level headings for categories, plants, and units. Machine learning needs one column name per variable, so the three-row header was combined into consistent single names.
+
+Q10. Why standardize the column names?
+A. Standardized names make the code reliable. For example, generation, outage, gate, elevation, rainfall, and outflow columns can be selected programmatically using predictable patterns like gen_agus1_unit1 or total_gen_agus1.
+
+Q11. What does the near-zero threshold of 0.05 mean?
+A. Values less than or equal to 0.05 MW are treated as zero. This handles tiny measurement or recording noise that should not be interpreted as real unit generation.
+
+Q12. Why interpolate short zero runs but preserve long zero runs?
+A. A short zero run of 1 to 2 hours may be a temporary recording issue or data gap, so it is interpolated. A longer zero run of 3 hours or more is more likely to represent a real outage, shutdown, or non-operating period, so it is preserved.
+
+Q13. Why interpolate only short missing gaps up to 2 hours?
+A. Short gaps can reasonably be estimated from adjacent values because hydro generation does not usually change randomly hour to hour. Longer gaps are riskier to interpolate directly, so remaining missing values are handled later by KNN imputation.
+
+Q14. Why use KNN imputation?
+A. KNN imputation uses similar rows in the dataset to estimate missing numeric values. This is better than simply using a mean because it considers the relationship among generation, elevation, gates, outflow, and other operational variables.
+
+Q15. Why use 5 neighbors in KNN?
+A. Five neighbors provide a practical balance. It uses enough nearby patterns to reduce noise, while avoiding too much averaging that might erase plant-specific behavior.
+
+Q16. How were spikes handled?
+A. The code checks each value against its neighboring values. If the current value deviates too much from the local mean, using a spike factor of 3.5, it is replaced by the local mean. This reduces isolated abnormal jumps.
+
+Q17. Why not remove all spikes?
+A. Some sudden changes are real operational changes, such as ramping or outage effects. The cleaning targets isolated abnormal spikes only, not every rapid change.
+
+Q18. How were negative values handled?
+A. Negative gate, spillway, and rainfall values were corrected to zero where applicable because those variables cannot physically be negative in this context.
+
+Q19. How were total plant generation values computed?
+A. For each plant, the script sums the cleaned unit-level generation columns. For example, total_gen_agus1 is the sum of gen_agus1_unit1 and gen_agus1_unit2.
+
+Q20. Why recalculate total generation instead of trusting the raw total?
+A. Recalculating totals from cleaned unit values ensures consistency. If unit values were cleaned but raw totals were not updated, the plant total could conflict with the unit-level data.
+
+Q21. What are outage columns?
+A. Outage columns represent unit operating or availability status. The code converts them into binary indicators where 1 means running or available and 0 means not running or unavailable.
+
+Q22. Why are outage indicators important?
+A. A plant cannot generate above its available unit capacity. Outage or unit-status information helps the model understand why generation may be low even if hydrological conditions are favorable.
+
+Q23. What are the Cell 1 outputs?
+A. Cell 1 saves cleaned_hourly_data.xlsx, cleaned_hourly_data.parquet, cell1_metadata.json, and Planned_Outages_Input.xlsx.
+
+Q24. Why save both Excel and Parquet?
+A. Excel is easy to inspect manually. Parquet is faster and more reliable for programmatic loading in Cell 2.
+
+Q25. What is the planned outage template?
+A. It is a 24-hour workbook for the next forecast horizon after the last historical timestamp. It contains Date, Hour, and unit-level outage or availability columns. Cell 2 uses it during day-ahead forecasting.
+
+Q26. Why is the planned outage template initialized from the last row?
+A. The last known unit status is used as a practical starting point. Operators can edit the template if they know future planned outages.
+
+Q27. What is the most important result of Cell 1?
+A. Cell 1 converts raw operational records into a clean, hourly, model-ready dataset with consistent generation, outage, gate, elevation, and outflow variables.
+
+
+SECTION 2: CELL 2 MODEL DESIGN QUESTIONS
+
+Q28. What is the purpose of Cell 2?
+A. Cell 2 trains or loads the RBFNN models, evaluates validation and testing performance, saves metrics and predictions, and generates the 24-hour day-ahead forecast.
+
+Q29. What model did you use?
+A. The main model is a Radial Basis Function Neural Network, or RBFNN, implemented in TensorFlow/Keras.
+
+Q30. Why choose RBFNN?
+A. RBFNN is suitable for nonlinear function approximation. Hydropower generation is nonlinear because output depends on operating conditions, unit availability, hydraulic behavior, temporal patterns, and upstream cascade influence. RBFNN can model local patterns through radial basis functions.
+
+Q31. What is the RBFNN architecture?
+A. The model has an input feature layer, a custom radial basis function layer with trainable centers and gamma values, and a linear dense output layer.
+
+Q32. What does the RBF layer do?
+A. It measures how close an input pattern is to learned centers. If the current operating condition is close to a learned center, that RBF neuron activates strongly. This helps the model learn local relationships in the data.
+
+Q33. What is gamma in the RBF layer?
+A. Gamma controls the width or sensitivity of each radial basis function. A larger gamma makes the neuron respond to a narrower neighborhood, while a smaller gamma gives a broader response.
+
+Q34. What are centers in RBFNN?
+A. Centers are representative operating patterns in the input space. The model initializes them using KMeans so the RBF layer starts with centers that reflect actual clusters in the training data.
+
+Q35. Why use KMeans for center initialization?
+A. KMeans places initial RBF centers near real groups of operating patterns. This gives the neural network a better starting point than random centers.
+
+Q36. What does the RBFNN predict?
+A. It predicts the next-hour generation change, not the direct generation level. The target is total_gen_plant(t+1) minus total_gen_plant(t).
+
+Q37. Why predict the delta instead of the direct level?
+A. Short-term hydro generation is highly dependent on the current state. Predicting the delta keeps the forecast anchored to the current generation and reduces unstable jumps. The final prediction is current generation plus the predicted delta.
+
+Q38. What does "persistence anchored" mean?
+A. It means the model starts from the idea that the next hour will be close to the current hour, then predicts the adjustment or change. This is useful because hydro generation often changes smoothly unless there is an operational event.
+
+Q39. Did you train one model or several models?
+A. One RBFNN model was trained per plant. This gives each Agus plant its own model because each plant has different capacity, unit configuration, and operating behavior.
+
+Q40. What are the plant capacities used?
+A. Agus 1: 80 MW, Agus 2: 180 MW, Agus 4: 158.1 MW, Agus 5: 55 MW, Agus 6: 219 MW, and Agus 7: 54 MW.
+
+Q41. What features were used?
+A. Features included time indicators, current generation, lagged generation, rolling statistics, generation differences, same-hour historical references, unit generation, unit shares, outage indicators, number of running units, plant availability, gate opening, elevation, outflow, rainfall if present, and upstream cascade features.
+
+Q42. What lag values were used?
+A. The RBFNN used lags of 1, 2, 3, 6, 12, 24, 48, 72, and 168 hours.
+
+Q43. Why include a 24-hour lag?
+A. The 24-hour lag captures daily operating repetition, such as similar demand or dispatch patterns at the same hour yesterday.
+
+Q44. Why include a 168-hour lag?
+A. A 168-hour lag represents the same hour one week earlier. This can capture weekly operation patterns.
+
+Q45. Why use rolling statistics?
+A. Rolling mean, standard deviation, minimum, and maximum describe recent operating behavior. They help the model understand whether the plant is stable, ramping, or operating within a variable range.
+
+Q46. Why include upstream features?
+A. The Agus plants are hydraulically connected. Upstream generation and flow behavior can affect downstream availability and generation. The cascade order used is Agus 1 -> Agus 2 -> Agus 4 -> Agus 5 -> Agus 6 -> Agus 7.
+
+Q47. Why include gate, elevation, and outflow variables?
+A. These variables represent hydrological and operational conditions that affect available water and generation potential.
+
+Q48. Why include unit-level features?
+A. Plant total generation depends on which units are running and how generation is distributed across units. Unit-level features help the model learn plant availability and capacity limits.
+
+Q49. Why use cyclical time features like sine and cosine?
+A. Hour, day, and month are cyclical. Sine and cosine encode time without creating artificial discontinuities, such as treating hour 24 and hour 1 as far apart even though they are adjacent.
+
+Q50. Why use target-hour features?
+A. Since the model predicts the next hour, target-hour indicators describe the hour being forecasted, not only the current hour.
+
+Q51. How was the dataset split?
+A. The dataset was split chronologically: first 70 percent for training, next 15 percent for validation, and final 15 percent for testing.
+
+Q52. Why chronological split instead of random split?
+A. Random splitting would mix future and past records, which can cause data leakage in time-series forecasting. Chronological splitting better simulates real forecasting, where the model is trained on past data and tested on later unseen data.
+
+Q53. What was the role of the training set?
+A. The training set was used to fit the model weights, scalers, RBF centers, and learned relationships.
+
+Q54. What was the role of the validation set?
+A. The validation set was used for early stopping, hyperparameter selection, shrinkage tuning, bias correction, and calibration selection. It helps choose model settings before final testing.
+
+Q55. What was the role of the testing set?
+A. The testing set was the final unseen period used to measure generalization performance. It was not used for model selection.
+
+Q56. What optimizer and loss function were used?
+A. The model used Adam optimizer and mean squared error loss.
+
+Q57. Why use MSE as training loss?
+A. MSE penalizes larger errors more strongly, which is helpful because large forecast errors are operationally important in generation nomination.
+
+Q58. What scalers were used?
+A. StandardScaler was used for input features and target deltas. Scaling is important because neural networks train better when features are on comparable ranges.
+
+Q59. What hyperparameters were searched?
+A. RBF centers of 80, 120, and 180; learning rates of 0.001 and 0.0005; and shrinkage values from 0.05 to 1.15.
+
+Q60. What is shrinkage?
+A. Shrinkage scales the predicted delta before adding it to current generation. It controls how strongly the model reacts. A shrinkage greater than 1 allows a stronger adjustment if validation results show it improves accuracy.
+
+Q61. Why did all plants select shrinkage 1.15?
+A. Based on validation performance, 1.15 gave the best operational MAPE after the delta prediction was converted to generation level. This means the raw predicted deltas were slightly conservative, and a modest amplification improved fit.
+
+Q62. What selected centers and learning rates were used?
+A. Agus 1 used 80 centers and learning rate 0.001. Agus 2 used 120 centers and 0.0005. Agus 4 used 180 centers and 0.0005. Agus 5 used 180 centers and 0.001. Agus 6 used 80 centers and 0.0005. Agus 7 used 120 centers and 0.001.
+
+Q63. Why do plants have different selected centers?
+A. Each plant has different behavior and feature complexity. More centers allow more local patterns, but too many centers may overfit. Validation performance determined the best choice for each plant.
+
+Q64. What post-calibration steps were used?
+A. The code applies validation-tuned shrinkage and bias correction. It also uses bin calibration for Agus 1 and Agus 5, and hourly residual correction for Agus 5 and Agus 7.
+
+Q65. Why use bias correction?
+A. Bias correction adjusts systematic underprediction or overprediction observed in validation. It is clipped to avoid unrealistic correction.
+
+Q66. Why use bin calibration?
+A. Bin calibration corrects errors that depend on generation level. For example, if the model consistently underpredicts in a certain operating range, the calibration can adjust that range.
+
+Q67. Why use hourly residual correction?
+A. Some plants have hour-specific residual patterns. Hourly correction adjusts median error by target hour based on validation behavior.
+
+Q68. Why were Agus 5 and Agus 7 harder to model?
+A. Their testing MAPE values were higher than most other plants, likely because they have smaller capacities and stronger sensitivity to unit operation. Small MW errors become larger percentage errors for low-capacity plants.
+
+Q69. How does the 24-hour forecast work?
+A. The forecast is recursive. The model predicts the next hour, applies outage and capacity limits, allocates plant generation to units, appends that forecasted row to the history, and repeats until 24 hours are produced.
+
+Q70. Why use recursive forecasting?
+A. A day-ahead forecast needs 24 future hours. After the first forecast, actual future values are not available, so the forecasted value is used as part of the history for the next step.
+
+Q71. How are unit forecasts produced?
+A. The model forecasts plant-level generation first, then allocates it to units using historical unit shares and available unit capacities from the outage template.
+
+Q72. How are planned outages considered?
+A. The Planned_Outages_Input.xlsx file tells the forecast which units are available. Forecasts are adjusted so unavailable units do not receive generation and plant output respects available capacity.
+
+
+SECTION 3: METRICS AND RESULTS QUESTIONS
+
+Q73. What metrics were used?
+A. The model was evaluated using operational MAPE, MAE, RMSE, and R2.
+
+Q74. What is MAPE?
+A. MAPE is Mean Absolute Percentage Error. It expresses the average error as a percentage of actual generation.
+
+Q75. Why call it operational MAPE?
+A. The code excludes very low actual generation values from MAPE because percentage error becomes misleading near zero. The threshold is max(1 MW, 1 percent of plant capacity).
+
+Q76. Why not exclude low values from MAE, RMSE, and R2?
+A. MAE, RMSE, and R2 are not percentage-based, so they remain meaningful even when actual generation is near zero. They are computed using all rows.
+
+Q77. What is MAE?
+A. MAE is Mean Absolute Error. It gives the average absolute difference between actual and forecasted generation in MW.
+
+Q78. What is RMSE?
+A. RMSE is Root Mean Square Error. It also measures error in MW, but it penalizes larger errors more strongly than MAE.
+
+Q79. What is R2?
+A. R2, or coefficient of determination, measures how much variance in actual generation is explained by the model. A value closer to 1 means better fit.
+
+Q80. What were the average RBFNN validation results?
+A. Average validation operational MAPE was 2.615 percent, MAE was 1.633 MW, RMSE was 3.789 MW, and R2 was 0.878.
+
+Q81. What were the average RBFNN testing results?
+A. Average testing operational MAPE was 2.519 percent, MAE was 1.355 MW, RMSE was 3.575 MW, and R2 was 0.925.
+
+Q82. Why is testing performance slightly better than validation performance?
+A. The final testing period may have contained more stable or more learnable operating patterns for several plants, especially Agus 4 and Agus 6. This does not necessarily mean overfitting; it means the unseen test period was forecasted well by the learned patterns.
+
+Q83. What are the plant-level RBFNN testing results?
+A. Agus 1: MAPE 3.476 percent, MAE 1.841 MW, RMSE 3.440 MW, R2 0.899.
+Agus 2: MAPE 1.372 percent, MAE 1.164 MW, RMSE 4.810 MW, R2 0.912.
+Agus 4: MAPE 0.611 percent, MAE 0.697 MW, RMSE 3.077 MW, R2 0.945.
+Agus 5: MAPE 4.040 percent, MAE 1.544 MW, RMSE 2.189 MW, R2 0.901.
+Agus 6: MAPE 1.405 percent, MAE 1.396 MW, RMSE 5.679 MW, R2 0.990.
+Agus 7: MAPE 4.209 percent, MAE 1.491 MW, RMSE 2.254 MW, R2 0.905.
+
+Q84. Which plant had the best testing MAPE?
+A. Agus 4 had the best testing MAPE at 0.611 percent.
+
+Q85. Why did Agus 4 perform best?
+A. Agus 4 likely had more consistent operating behavior and stronger learnable patterns during the testing period. Its features and historical lags allowed the model to track the generation profile very closely.
+
+Q86. Which plants had the highest testing MAPE?
+A. Agus 7 had 4.209 percent and Agus 5 had 4.040 percent. These are still acceptable but higher than the other plants.
+
+Q87. Why are Agus 5 and Agus 7 errors higher?
+A. They have smaller capacities, so a small absolute MW error can become a larger percentage error. Their operation may also be more sensitive to unit availability and local operating decisions.
+
+Q88. Why is Agus 6 R2 very high at 0.990?
+A. Agus 6 has a wider generation range and strong explainable variation. The model captured that variation well, especially compared with benchmark models.
+
+Q89. Why can a plant have low MAPE but higher RMSE?
+A. MAPE is percentage-based and excludes very low actual values. RMSE is in MW and penalizes larger individual MW errors. A plant with high capacity can have low percentage error but still show several MW of RMSE.
+
+Q90. What does the testing R2 of 0.925 mean overall?
+A. It means that, on average, the RBFNN explained about 92.5 percent of the variation in unseen testing generation data.
+
+Q91. Did the RBFNN outperform the benchmark models?
+A. Yes. In the overall comparison, RBFNN achieved the best average testing MAPE, MAE, RMSE, and R2 compared with Random Forest and XGBoost.
+
+Q92. What were the benchmark average testing results?
+A. Random Forest had average testing MAPE of 5.864 percent, MAE of 2.722 MW, RMSE of 4.755 MW, and R2 of 0.916. XGBoost had average testing MAPE of 8.876 percent, MAE of 3.764 MW, RMSE of 6.498 MW, and R2 of 0.898.
+
+Q93. Why did RBFNN outperform Random Forest and XGBoost?
+A. The RBFNN used a residual delta target, cascade-aware features, hydrological lag features, more extensive temporal features, and validation-based calibration. The benchmark models used a smaller feature set and direct next-hour generation targets.
+
+Q94. Did RBFNN win for every plant?
+A. In the final overall comparison file, RBFNN has the lowest testing MAPE for all six plants: Agus 1, Agus 2, Agus 4, Agus 5, Agus 6, and Agus 7.
+
+Q95. Why were benchmarks weak for Agus 6?
+A. Random Forest and XGBoost had much higher Agus 6 testing MAPE than RBFNN. This suggests their direct-level prediction and smaller feature set did not generalize as well to Agus 6 testing behavior. The RBFNN residual approach handled the plant's changes better.
+
+Q96. What did the day-ahead forecast produce?
+A. The RBFNN generated a 24-hour forecast for 2025-07-01. It includes unit-level MW, plant total MW, and total cascade generation.
+
+Q97. What was the total cascade forecast range?
+A. The total cascade forecast ranged from about 569.455 MW to 581.435 MW, with an average of about 574.445 MW over the 24-hour forecast horizon.
+
+Q98. Why is the forecast range relatively stable?
+A. The model is persistence-anchored, uses ramp limiting, and respects available capacity. Short-term hydro generation often changes gradually unless major dispatch or outage changes occur.
+
+Q99. What is the practical meaning of a 2.519 percent testing MAPE?
+A. It means that for operational generation levels, the average percentage deviation from actual output in the unseen testing period was around 2.5 percent. For day-ahead nomination, that is a strong level of accuracy.
+
+Q100. What is the practical meaning of MAE 1.355 MW?
+A. Across plants, the average absolute error was about 1.355 MW. This is small relative to the capacities of the modeled plants, especially for short-term generation planning.
+
+
+SECTION 4: "WHY DID WE GET THESE RESULTS?" QUESTIONS
+
+Q101. Why did the cleaned data improve the model?
+A. Cleaning removed avoidable noise, corrected short gaps, preserved real zero-generation periods, standardized columns, and made the dataset hourly. This allowed the model to learn operational patterns instead of data-entry artifacts.
+
+Q102. Why did the residual model perform well?
+A. The next hour is usually close to the current hour. By predicting only the change, the RBFNN focused on learning deviations from the current state instead of relearning the entire generation level each time.
+
+Q103. Why did validation and testing both show good results?
+A. The chronological split showed that the learned patterns were not only fitted to training data but also generalized to later time periods. The testing metrics confirm performance on unseen data.
+
+Q104. Why is RBFNN suitable for cascaded hydropower?
+A. Cascaded hydropower has nonlinear relationships and local operating regimes. RBFNN handles nonlinear local patterns, while upstream and hydrological features represent cascade dependency.
+
+Q105. Why do smaller plants have higher MAPE?
+A. MAPE is sensitive to the denominator. For small-capacity plants, even a 1 to 2 MW error can create a higher percentage error than the same MW error in a larger plant.
+
+Q106. Why did Agus 4 have very low MAPE?
+A. The model likely captured a stable relationship between Agus 4's current generation, lags, upstream behavior, and operational features. Its testing period also appears to be strongly aligned with learned historical patterns.
+
+Q107. Why did Agus 6 have high R2 but RMSE of 5.679 MW?
+A. Agus 6 has a large capacity and large generation range. The model can explain most variation, giving high R2, while still having several-MW errors because the plant's operating scale is larger.
+
+Q108. Why use capacity clipping?
+A. Forecasts must be physically feasible. Clipping prevents predicted generation from exceeding plant or available unit capacity.
+
+Q109. Why use ramp limiting?
+A. Ramp limiting prevents unrealistic hour-to-hour jumps during recursive forecasting. It keeps the forecast close to historically observed operating changes.
+
+Q110. Why are metrics not perfect?
+A. Actual hydro generation depends on dispatch instructions, real-time operator decisions, unexpected outages, inflow changes, and conditions not fully captured in the dataset. The model can learn patterns, but it cannot know unrecorded future decisions.
+
+Q111. What are the main sources of error?
+A. Possible sources include unrecorded operational decisions, sudden unit outages, limitations in available hydrological inputs, recursive forecast error accumulation, and percentage sensitivity during low generation.
+
+Q112. What result should you emphasize to the panel?
+A. Emphasize that the RBFNN performed best on the unseen testing set, with average testing MAPE of 2.519 percent and R2 of 0.925, and that it outperformed Random Forest and XGBoost across the six Agus plants in the final comparison.
+
+
+SECTION 4B: DETAILED DISCUSSION OF RESULTS - WHY RBFNN GOT THESE RESULTS AND WHY BENCHMARKS DID NOT
+
+Main explanation:
+The RBFNN achieved better results because its design matches the physical and operational nature of short-term hydro generation. The generation for the next hour is usually close to the current generation, but it is affected by small changes in unit availability, upstream operation, gate movement, reservoir elevation, and time-of-day operating patterns. The RBFNN does not predict the whole generation level from zero. It predicts the next-hour change, then adds that change to the current generation. This makes the prediction stable and realistic.
+
+The benchmarks, Random Forest and XGBoost, are strong models, but in this project they used direct next-hour generation prediction with a smaller feature set. They did not have the same full cascade-aware, hydrology-aware, and calibration-enhanced residual structure. Because of that, they were less able to handle plant-specific changes, especially when the testing period had operating conditions that were different from the training pattern.
+
+Q112A. Why can the RBFNN achieve a low average testing MAPE of 2.519 percent?
+A. It achieved low testing MAPE because it forecasted generation changes relative to current generation. Since hydro generation usually changes gradually hour by hour, this residual approach reduces large percentage errors. The model also used lagged values, rolling statistics, unit status, upstream features, and hydrological variables, so it had more information about why generation would increase, decrease, or remain stable.
+
+Q112B. Why can the RBFNN achieve testing MAE of 1.355 MW?
+A. MAE of 1.355 MW means the average absolute error was small in MW terms. The model achieved this because it used the current generation as an anchor and only learned the adjustment. This reduces the chance of large absolute deviations. Post-calibration, bias correction, shrinkage, and capacity clipping also helped keep predictions close to realistic operating values.
+
+Q112C. Why can the RBFNN achieve testing RMSE of 3.575 MW?
+A. RMSE penalizes large errors. The RBFNN kept RMSE low because ramp limiting and persistence anchoring prevented unrealistic jumps during testing and forecasting. It still has some RMSE because sudden dispatch changes, unexpected outages, or unrecorded operator decisions cannot be fully predicted from historical data alone.
+
+Q112D. Why can the RBFNN achieve testing R2 of 0.925?
+A. R2 of 0.925 means the model explained most of the variation in unseen testing generation. This happened because the feature set captured the major sources of variation: recent generation, daily patterns, weekly patterns, unit availability, hydraulic variables, and upstream cascade behavior.
+
+Q112E. Why did Random Forest and XGBoost not achieve the same average testing MAPE?
+A. Their average testing MAPEs were higher because they predicted the next-hour generation level more directly and used a smaller feature set. They did not use the same residual delta formulation, extensive upstream features, hydrological lag features, shrinkage tuning, bin calibration, or hourly residual correction. As a result, they were less stable when the testing period had plant behavior that differed from the training pattern.
+
+Q112F. Why is residual or delta forecasting better for this problem?
+A. In short-term hydro forecasting, the best first estimate for the next hour is often the current hour. The important question is not "What is the total generation from scratch?" but "How much will generation change from now?" RBFNN answers the second question. That is why it can track the actual curve more smoothly.
+
+Q112G. Why does the RBFNN handle nonlinear behavior better?
+A. The RBF layer activates based on similarity to learned operating patterns. If the current condition is similar to past conditions, the relevant RBF neurons respond strongly. This helps the model represent local nonlinear relationships, such as how a certain gate-elevation-generation combination behaves differently from another operating condition.
+
+Q112H. Why can Random Forest struggle in this setup?
+A. Random Forest averages many decision trees. This is robust, but it can smooth predictions and struggle to extrapolate changes outside the exact patterns learned in training. In recursive forecasting, this smoothing can cause the model to lag behind actual plant changes.
+
+Q112I. Why can XGBoost struggle in this setup?
+A. XGBoost is powerful, but it can be sensitive to changes between training and testing distributions. If the final testing period has operating states not well represented in training, direct boosted-tree predictions can overreact or underreact. In this project, that was especially visible in some plant results such as Agus 6.
+
+Q112J. Why did RBFNN perform best for Agus 4 with 0.611 percent testing MAPE?
+A. Agus 4 likely had a stable and learnable operating pattern during the testing period. Its current generation, lags, upstream Agus 2 influence, gate and elevation variables, and rolling statistics gave the RBFNN enough information to match the next-hour changes very closely. Because the actual generation pattern was consistent, the residual model produced very small percentage errors.
+
+Q112K. Why did Agus 2 get a low testing MAPE of 1.372 percent?
+A. Agus 2 benefited from strong lag patterns and upstream Agus 1 information. Its larger capacity also means small MW deviations become smaller percentage errors. The RBFNN could learn the normal hourly movement and correct the next-hour output using the residual target.
+
+Q112L. Why did Agus 6 get a low testing MAPE of 1.405 percent and high R2 of 0.990?
+A. Agus 6 has the largest capacity among the modeled plants at 219 MW and has five units. Its output variation is large, but the model captured that variation well using unit availability, upstream Agus 5 features, lags, rolling statistics, and hydrological variables. The high R2 means the RBFNN tracked the overall pattern very well.
+
+Q112M. Why did benchmarks fail badly for Agus 6 compared with RBFNN?
+A. Random Forest had Agus 6 testing MAPE of 19.879 percent and XGBoost had 37.541 percent, while RBFNN had 1.405 percent. This indicates that direct benchmark predictions did not generalize well to the final Agus 6 testing behavior. The RBFNN handled it better because it predicted controlled generation changes from the current state and used a richer feature set, including upstream and operational information.
+
+Q112N. Why did Agus 1 have RBFNN testing MAPE of 3.476 percent?
+A. Agus 1 had good but not the best performance. It has smaller capacity than Agus 2, Agus 4, and Agus 6, so small MW errors create larger percentage errors. Its result was still strong because the model used bin calibration, time features, lags, and plant-specific operational variables to reduce systematic error.
+
+Q112O. Why did Agus 5 have higher testing MAPE of 4.040 percent?
+A. Agus 5 has only 55 MW capacity, so small absolute errors become larger percentage errors. It may also have more sensitive unit-level behavior because it has fewer units. The model used bin calibration and hourly residual correction for Agus 5, which helped, but some operational variability remained.
+
+Q112P. Why did Agus 7 have the highest testing MAPE of 4.209 percent?
+A. Agus 7 has a small capacity of 54 MW. Because of that, even around 1 to 2 MW of error can produce a noticeable percentage error. Agus 7 is also downstream, so its behavior can be affected by accumulated upstream operation. The RBFNN still performed best compared with the benchmarks because it used upstream Agus 6 features and hourly residual correction.
+
+Q112Q. Why are the benchmark differences small for Agus 1, Agus 5, and Agus 7 but large for Agus 6?
+A. For smaller plants, all models can appear close in percentage terms because operation may be bounded in a narrower capacity range and errors are dominated by small MW deviations. For Agus 6, the operating range and unit configuration are larger, so a model that fails to track the correct pattern can produce much larger errors. The RBFNN's residual and cascade-aware structure protected it from that failure.
+
+Q112R. Why does RBFNN sometimes have slightly higher RMSE than a benchmark for one plant but still better MAPE?
+A. RMSE and MAPE measure different things. RMSE penalizes large MW errors, while MAPE measures percentage error on operational rows. A model can have slightly better RMSE but worse MAPE if its errors occur at generation levels where percentage impact is larger. The final decision used several metrics, but the RBFNN was strongest overall.
+
+Q112S. Why did validation performance support the final model choice?
+A. The validation set was used to tune centers, learning rate, shrinkage, and calibration. The selected settings were then tested on the final unseen period. Since the testing results remained strong, the validation choices generalized well.
+
+Q112T. Why does the RBFNN not simply memorize the training data?
+A. The model was tested on later chronological data that was not used in training. It also used early stopping and validation selection. If it only memorized training data, testing MAPE and R2 would be poor, but the testing results were strong.
+
+Q112U. How should I explain "why the RBFNN can get those results" in a simple oral answer?
+A. "The RBFNN got those results because the model design follows the real behavior of short-term hydro generation. The next hour is usually close to the current hour, so the model predicts only the change. It also uses past generation, operating status, hydrological variables, and upstream cascade effects. Because of that, it can adjust the forecast based on real operational patterns instead of guessing the whole generation value directly."
+
+Q112V. How should I explain "why the benchmarks cannot get those results" in a simple oral answer?
+A. "The benchmarks are good general machine learning models, but in this study they used a more direct prediction approach and fewer operational and cascade-aware corrections. They do not have the same residual anchoring, RBF local-pattern learning, shrinkage, and calibration steps. That is why they were less stable in the unseen testing period, especially for plants with more complex operation like Agus 6."
+
+Q112W. What is the strongest technical explanation for RBFNN superiority?
+A. The RBFNN combined four advantages: residual delta prediction, local nonlinear pattern learning through RBF neurons, cascade-aware and outage-aware feature engineering, and validation-based calibration. The benchmarks did not combine all four of these advantages.
+
+Q112X. What is the strongest practical explanation for RBFNN superiority?
+A. The RBFNN behaves more like an operator's short-term reasoning. It starts from the current generation, checks recent behavior and unit availability, considers upstream conditions, then adjusts the next-hour output. This is why its forecasts are stable and operationally realistic.
+
+Q112Y. What is the final result discussion paragraph I can say during defense?
+A. "The results show that the RBFNN generalized better than the benchmark models because it was designed around the actual behavior of hydro generation. Instead of predicting generation directly, it predicted the next-hour change from the current output. This reduced sudden forecast jumps and improved continuity. The model also used richer operational inputs, including lags, rolling statistics, unit availability, gate and elevation variables, outflow, and upstream cascade features. These helped the model understand both temporal and physical operating patterns. Random Forest and XGBoost are strong benchmarks, but they used a more direct prediction structure and fewer calibration mechanisms, so they were less able to adapt to the final testing period. This is why the RBFNN achieved the best average testing MAPE of 2.519 percent and the highest testing R2 of 0.925."
+
+
+SECTION 4C: HOW TO PROVE THE MODEL IS LEARNING AND NOT RULE-BASED
+
+Main explanation:
+The model is not rule-based because the final forecast is not produced by fixed if-then rules written by the programmer. The code defines the learning architecture, prepares the features, and sets physical safeguards such as capacity limits. However, the actual relationship between inputs and output is learned from historical data through model training. The RBFNN learns trainable centers, gamma values, and output weights using data and gradient-based optimization. Its performance is then checked on validation and testing data that were not used to fit the model.
+
+Q112Z. How can you prove that the RBFNN is learning and not just rule-based?
+A. I can prove it through the training process. The RBFNN has trainable parameters: RBF centers, gamma values, and dense output weights. These values are not manually assigned as rules. They are adjusted during training using historical input-output examples and mean squared error loss. If the model were rule-based, there would be fixed if-then statements directly mapping conditions to forecast values.
+
+Q112AA. What part of the code shows that the model learns?
+A. In Cell 2, the model is built with a custom RBFLayer and a Dense output layer. The RBF centers and log_gamma are declared as trainable weights. The model is compiled with Adam optimizer and MSE loss, then trained using model.fit on training data. This is a learning process, not a rule table.
+
+Q112AB. What exactly does the model learn?
+A. It learns which historical operating patterns are important, how wide or sensitive each RBF neuron should be, and how to combine the activated RBF neurons to predict the next-hour generation change.
+
+Q112AC. Are the RBF centers rules?
+A. No. The centers are learned representative patterns in the input space. They are initialized using KMeans from the training data and then treated as trainable parameters. A rule would be manually written, such as "if gate opening is high, output is high." The RBF centers do not work like that; they represent learned similarity regions.
+
+Q112AD. Is the model just using formulas?
+A. It uses mathematical functions, but that does not make it rule-based. All neural networks use mathematical functions. The key difference is that the parameters inside those functions are learned from data rather than manually fixed by the programmer.
+
+Q112AE. What parts are rule-based or manually designed?
+A. The preprocessing rules, feature engineering, physical capacity clipping, outage constraints, and ramp limiting are manually designed safeguards. But the prediction of the next-hour generation change is learned by the RBFNN. So the system contains rule-based preprocessing and constraints, but the forecasting model itself is machine learning.
+
+Q112AF. How do you explain the difference between rule-based safeguards and learned prediction?
+A. The rules only prepare the data and keep the output physically realistic. They do not decide the forecast value by themselves. The actual predicted delta comes from the trained RBFNN model.
+
+Q112AG. Why does validation and testing prove learning?
+A. The model was evaluated on later chronological data that it did not train on. If it were only memorizing or following hardcoded rules, it would not necessarily perform well on unseen periods. The testing MAPE of 2.519 percent and R2 of 0.925 show that the model learned general patterns that transferred to new data.
+
+Q112AH. Does high testing performance alone prove learning?
+A. It is evidence, but not the only evidence. The stronger proof is the full training pipeline: trainable weights, optimization using loss, validation-based model selection, and final testing on unseen data.
+
+Q112AI. How can you show that the model is not just copying the current generation?
+A. The RBFNN predicts a delta, not simply the same value. If it were only copying current generation, the predicted change would always be zero. But the model learns positive and negative changes using lags, rolling statistics, time features, outage status, and hydrological variables. The validation and testing metrics measure how well those learned changes match actual next-hour generation.
+
+Q112AJ. Is persistence anchoring the same as rule-based prediction?
+A. No. Persistence anchoring means the forecast starts from current generation, but the adjustment is learned by the RBFNN. A pure persistence rule would simply say next hour equals current hour. Our model says next hour equals current hour plus a learned predicted change.
+
+Q112AK. How do you defend the use of calibration if asked whether it makes the model rule-based?
+A. Calibration is a validation-based correction layer, not the main forecasting model. It adjusts systematic bias found in validation data, but it does not replace the learned RBFNN. The core prediction still comes from the trained neural network.
+
+Q112AL. What is the best oral answer if the panel asks, "Is this just rule-based?"
+A. "No, sir/ma'am. The system has some rule-based preprocessing and physical constraints, but the forecasting model is not rule-based. The RBFNN learns trainable centers, gamma values, and output weights from historical data through optimization. The code does not manually define if-then rules for each forecast. It trains the model on the first 70 percent of the data, tunes it on validation data, and then tests it on unseen chronological data. The strong testing result shows that the model learned general generation patterns rather than simply following fixed rules."
+
+Q112AM. What is the clearest technical proof?
+A. The clearest technical proof is that Cell 2 calls model.fit using training inputs and target deltas. During model.fit, TensorFlow updates the neural network's trainable weights to minimize MSE loss. A rule-based system would not need training, loss minimization, trainable weights, or saved neural network parameters.
+
+Q112AN. What saved files prove that trained learning happened?
+A. Cell 2 saves trained model files such as rbfnn_agus1.keras, scalers such as x_scaler_agus1.pkl and y_scaler_agus1.pkl, and metadata files such as meta_agus1.json. These files store learned parameters and selected settings from training.
+
+Q112AO. Why does each plant have different selected centers and learning rates if it were not learning?
+A. Each plant selected different model settings based on validation performance. For example, Agus 1 used 80 centers and 0.001 learning rate, Agus 4 used 180 centers and 0.0005, and Agus 6 used 80 centers and 0.0005. If it were fixed rule-based logic, these plant-specific learned configurations would not be necessary.
+
+Q112AP. How can benchmark comparison support that the model is learning?
+A. Random Forest and XGBoost were also trained machine learning models. The fact that all models were evaluated under the same split, but RBFNN performed better, shows that model design and learned relationships mattered. If the result were only rule-based, the comparison would not show meaningful differences among learning algorithms.
+
+Q112AQ. What is a simple analogy?
+A. A rule-based system is like a checklist written by a person. A learning model is like a student that studies examples and adjusts its internal parameters based on mistakes. The RBFNN studied historical operating examples, measured its error, and changed its weights to reduce that error.
+
+Q112AR. What should I avoid saying?
+A. Do not say that there are no rules anywhere in the system. A better answer is: "The preprocessing and constraints use rules, but the forecasting relationship is learned by the RBFNN."
+
+
+SECTION 4D: HOW THE MODEL WAS OPTIMIZED AND WHY IT ACHIEVED LOW METRICS, ESPECIALLY MAPE
+
+Main explanation:
+The low MAPE was not achieved by one step only. It came from a complete optimization process: clean input data, residual delta target design, feature engineering, chronological validation, hyperparameter search, early stopping, shrinkage tuning, bias correction, selected calibration, operational MAPE definition, and physical forecast constraints. Each part reduced a different source of error.
+
+Q112AS. How was the RBFNN optimized?
+A. The RBFNN was optimized by testing different RBF center counts, different learning rates, and different shrinkage values using the validation set. The code searched RBF centers of 80, 120, and 180; learning rates of 0.001 and 0.0005; and shrinkage values from 0.05 to 1.15. The best configuration was selected based on validation operational MAPE, with RMSE and R2 also considered in the scoring.
+
+Q112AT. Why use the validation set for optimization?
+A. The validation set represents unseen data during training but is still available for model selection. It helps choose settings that generalize better instead of only fitting the training set. The final testing set remains separate for unbiased evaluation.
+
+Q112AU. What selected settings did the optimized RBFNN use?
+A. Agus 1 used 80 centers and learning rate 0.001. Agus 2 used 120 centers and 0.0005. Agus 4 used 180 centers and 0.0005. Agus 5 used 180 centers and 0.001. Agus 6 used 80 centers and 0.0005. Agus 7 used 120 centers and 0.001. All plants selected shrinkage 1.15 based on validation performance.
+
+Q112AV. How did hyperparameter search help lower MAPE?
+A. Hyperparameter search allowed each plant to use the model complexity that best matched its behavior. Too few centers may underfit and miss local patterns. Too many centers may overfit. The validation search selected the center count and learning rate that produced the lowest validation operational MAPE.
+
+Q112AW. Why did RBF center count matter?
+A. RBF centers represent local operating patterns. More centers allow the model to represent more plant conditions, but too many may make the model too sensitive. The selected center count balanced accuracy and generalization.
+
+Q112AX. Why did learning rate matter?
+A. Learning rate controls how fast the neural network updates its weights. If it is too high, training can become unstable. If it is too low, learning may be slow or incomplete. The search between 0.001 and 0.0005 helped find stable learning for each plant.
+
+Q112AY. How did early stopping help optimization?
+A. Early stopping monitored validation loss and stopped training when improvement stopped. This prevented the model from continuing to memorize the training set after it had already learned the useful pattern.
+
+Q112AZ. How did StandardScaler help lower errors?
+A. Scaling made all input features and target deltas comparable in magnitude. Neural networks train more reliably when one feature, such as gate opening or generation, does not dominate only because of its numeric scale.
+
+Q112BA. How did the residual delta target help lower MAPE?
+A. MAPE becomes large when forecasts deviate significantly from actual values. By predicting only the next-hour change and anchoring to current generation, the model avoided large jumps and kept predictions close to actual short-term behavior. This directly helped reduce percentage errors.
+
+Q112BB. How did shrinkage tuning lower MAPE?
+A. Shrinkage controls how much of the predicted delta is applied. During validation, the code tested several shrinkage values. The selected value, 1.15, showed that slightly strengthening the predicted delta reduced validation MAPE. This means the raw model changes were somewhat conservative, and 1.15 better matched actual next-hour movement.
+
+Q112BC. Why did all plants select shrinkage 1.15?
+A. The validation results showed that 1.15 produced the best operational MAPE for all six plants. It suggests that across the cascade, the initial delta predictions tended to be slightly smaller than the actual needed adjustment.
+
+Q112BD. How did bias correction lower MAPE?
+A. Bias correction removed systematic overprediction or underprediction observed in validation. For example, if the model was consistently a little low, a small MW correction improved the forecast level and reduced percentage error.
+
+Q112BE. How did bin calibration lower MAPE?
+A. Bin calibration corrected errors by generation range. Some models are accurate at medium generation but less accurate at low or high generation. Bin calibration used validation data to adjust predictions depending on the operating range. This was used for Agus 1 and Agus 5.
+
+Q112BF. How did hourly residual correction lower MAPE?
+A. Hourly residual correction adjusted recurring hour-specific errors. If the model tended to underpredict or overpredict at a certain hour, the validation residual pattern was used to correct it. This was applied to Agus 5 and Agus 7.
+
+Q112BG. Why were extra calibrations not applied to all plants?
+A. Extra calibration was only used where it improved validation performance. Applying calibration unnecessarily can overfit or distort predictions. The code keeps calibration plant-specific.
+
+Q112BH. How did feature engineering lower MAPE?
+A. Feature engineering gave the model more explanatory information. Lags showed recent and historical generation, rolling statistics showed stability and variability, unit status showed availability, hydrological variables showed water conditions, and upstream features represented cascade influence. Better input information helped the model make smaller percentage errors.
+
+Q112BI. How did clean data lower MAPE?
+A. Clean data reduced false patterns from missing values, spikes, incorrect zero values, and inconsistent totals. Since MAPE is sensitive to incorrect actual or predicted values, cleaning helped both training and evaluation become more reliable.
+
+Q112BJ. How did operational MAPE affect the reported MAPE?
+A. Operational MAPE excludes actual generation values below max(1 MW, 1 percent of plant capacity). This avoids distorted percentage errors when actual generation is near zero. It does not hide the errors completely because MAE, RMSE, and R2 still use all rows.
+
+Q112BK. Is the low MAPE only because low actual values were excluded?
+A. No. The low MAPE is supported by other metrics too: testing MAE was 1.355 MW, RMSE was 3.575 MW, and R2 was 0.925. If the model were only benefiting from MAPE filtering, the other metrics would not also be strong.
+
+Q112BL. How did physical constraints help lower forecast errors?
+A. Capacity clipping and ramp limiting prevented physically impossible predictions. For example, the forecast cannot exceed available plant or unit capacity, and sudden unrealistic jumps are limited. This helped keep recursive day-ahead forecasts realistic.
+
+Q112BM. Did the model optimize directly on testing data?
+A. No. The testing data was not used for optimization. Training used the training set, tuning used the validation set, and final reporting used the testing set. This protects the credibility of the low testing MAPE.
+
+Q112BN. What exactly made MAPE low for Agus 4?
+A. Agus 4 had a stable and learnable testing pattern, and the optimized model used 180 centers, learning rate 0.0005, shrinkage 1.15, upstream Agus 2 features, lags, rolling features, and hydrological variables. These allowed the model to closely match actual next-hour changes, producing 0.611 percent testing MAPE.
+
+Q112BO. What exactly made MAPE low for Agus 6?
+A. Agus 6 benefited from its rich unit-level information, upstream Agus 5 influence, larger capacity, and strong learnable generation pattern. The optimized model used 80 centers, learning rate 0.0005, and shrinkage 1.15, producing 1.405 percent testing MAPE and 0.990 testing R2.
+
+Q112BP. Why are Agus 5 and Agus 7 still higher after optimization?
+A. They are smaller plants, so percentage error is more sensitive to small MW deviations. Even after bin calibration and hourly correction, some operational variability remained. Their MAPEs of 4.040 percent and 4.209 percent are still acceptable and better than the benchmarks.
+
+Q112BQ. How did optimization make RBFNN better than Random Forest and XGBoost?
+A. The benchmarks were trained with fixed model settings and a smaller direct-prediction feature structure. The RBFNN was optimized with plant-specific center counts, learning rates, shrinkage, bias correction, and selected calibration. This gave the RBFNN more ways to reduce validation error and generalize to testing.
+
+Q112BR. What should I say if the panel asks, "Did you tune until you got a low MAPE?"
+A. "No, sir/ma'am. We optimized using the validation set, not the testing set. The testing set was kept separate for final evaluation. The low testing MAPE shows that the validation-selected model generalized to unseen data."
+
+Q112BS. What should I say if the panel asks, "Is the optimization overfitting?"
+A. "We reduced overfitting by using chronological splitting, early stopping, validation-based selection, and final testing on a later unseen period. If the optimization overfit only the validation set, the testing metrics would likely degrade, but the testing MAPE remained low at 2.519 percent."
+
+Q112BT. Why does the model use validation MAPE as the selection focus?
+A. MAPE is easy to interpret for operational forecasting because it expresses error as a percentage. Capacity nomination is concerned with relative accuracy, so operational MAPE is a practical selection metric. MAE, RMSE, and R2 were still reported to provide a complete performance view.
+
+Q112BU. What is the simplest explanation of how optimization lowered MAPE?
+A. "We lowered MAPE by cleaning the data, giving the model relevant time-series and operational features, selecting the best plant-specific RBFNN settings using validation data, correcting systematic bias, and preventing unrealistic forecasts with capacity and ramp constraints."
+
+Q112BV. What is the best oral answer for "How was your model optimized?"
+A. "The model was optimized in several stages. First, the data was cleaned and transformed into reliable hourly records. Second, the model was designed as a residual forecaster, so it predicted next-hour change instead of direct generation. Third, for each plant we searched different RBF center counts, learning rates, and shrinkage values using the validation set. Fourth, we applied validation-based corrections such as bias correction, bin calibration, and hourly residual correction where they improved performance. Finally, the model was tested on a separate chronological testing set. This is why the final RBFNN achieved a low average testing MAPE of 2.519 percent."
+
+
+SECTION 5: LIMITATIONS AND DEFENSE QUESTIONS
+
+Q113. What are the limitations of your study?
+A. The study depends on the available historical data from January 2024 to June 2025. It does not fully include future rainfall forecasts, formal inflow forecasts, market dispatch instructions, or unexpected real-time outages. The day-ahead forecast is recursive, so errors may accumulate over the 24-hour horizon.
+
+Q114. Is the model ready for real operation?
+A. It is a strong decision-support prototype. For full operation, it should be continuously validated with new data, connected to updated outage schedules, and ideally enhanced with real-time hydrological and dispatch inputs.
+
+Q115. Did you use future data during training?
+A. No. The split was chronological. Training used the earliest 70 percent, validation used the next 15 percent, and testing used the final 15 percent.
+
+Q116. How did you prevent overfitting?
+A. The workflow used chronological validation, early stopping, limited hyperparameter search, validation-based model selection, and final evaluation on a separate testing period.
+
+Q117. Why not use LSTM or GRU?
+A. LSTM and GRU are valid alternatives for sequence forecasting, but this study focused on RBFNN because it is suitable for nonlinear function approximation and can be trained with engineered lag and rolling features. LSTM or GRU can be recommended for future work.
+
+Q118. Why compare with Random Forest and XGBoost?
+A. They are strong and widely used machine learning benchmarks for tabular time-series features. Comparing against them tests whether the proposed RBFNN gives added value.
+
+Q119. Why not use only physical hydrological equations?
+A. A purely physical model would require detailed hydraulic parameters, reservoir rules, inflow, turbine characteristics, and dispatch decisions that may not be fully available. The AI approach learns from operational data and is more practical for this dataset.
+
+Q120. What is the main contribution of the study?
+A. The main contribution is an outage-aware and cascade-aware RBFNN forecasting framework for short-term Agus hydropower generation, using cleaned hourly operational data, residual delta forecasting, validation-based calibration, and unit-capacity-aware day-ahead forecasting.
+
+Q121. What would you improve next?
+A. I would add rainfall forecasts, inflow forecasts, reservoir operation schedules, dispatch or nomination records, more years of data, uncertainty intervals, and comparison with sequence models such as LSTM, GRU, or Temporal Convolutional Networks.
+
+Q122. How would you explain your whole code in one sentence?
+A. Cell 1 cleans the raw hydro data into a reliable hourly dataset, and Cell 2 uses that dataset to train, validate, test, and deploy RBFNN models that forecast next-hour generation changes for each Agus plant and recursively produce a 24-hour day-ahead forecast.
+
+
+SECTION 6: QUICK ANSWERS FOR COMMON PANEL FOLLOW-UPS
+
+Q123. What does "cascade-aware" mean?
+A. It means the model includes upstream plant information because downstream plants can be affected by upstream operation in a cascaded hydro system.
+
+Q124. What does "outage-aware" mean?
+A. It means unit status is included as a feature and planned outage inputs are used during forecasting so the result respects unit availability.
+
+Q125. What does "short-term" mean in this study?
+A. Short-term refers to hourly forecasting for the next 24 hours, specifically day-ahead generation forecasting.
+
+Q126. Why use 24-hour day-ahead forecasting?
+A. Day-ahead forecasts support capacity nomination and operational planning for the next operating day.
+
+Q127. What is the difference between validation and testing?
+A. Validation is used to choose and tune model settings. Testing is the final unseen evaluation and is used to report generalization performance.
+
+Q128. What does early stopping do?
+A. Early stopping stops training when validation loss no longer improves, helping prevent overfitting.
+
+Q129. What does StandardScaler do?
+A. It standardizes features by removing the mean and scaling to unit variance, making neural network training more stable.
+
+Q130. Why is XGBoost worse in testing despite being strong?
+A. A strong algorithm can still underperform if its target formulation and features are less suited to the problem. Here, the RBFNN's residual target, cascade-aware features, and calibration gave better testing generalization.
+
+Q131. What if the panel asks why RBFNN has many features?
+A. The features represent real causes of generation behavior: time patterns, past generation, rolling behavior, unit status, hydraulic variables, and upstream cascade effects. They are not arbitrary; they are tied to the physical and operational system.
+
+Q132. What if the panel asks about data leakage from rolling and lag features?
+A. The lag and rolling features are based on current and past values only. The target is next-hour generation change. The chronological split prevents future testing data from being used in training.
+
+Q133. What if the panel asks why forecast values are clipped?
+A. Clipping is necessary because generation forecasts must obey physical plant capacity and available unit capacity. Without clipping, the model could produce physically impossible values.
+
+Q134. What if the panel asks why not use raw total generation directly?
+A. The code recalculates total generation from cleaned unit generation so the plant totals are consistent with unit-level data and outage status.
+
+Q135. What if the panel asks about low-generation MAPE exclusion?
+A. Percentage error becomes unstable when the actual value is near zero. For example, a small MW error can become an extremely large percentage. Operational MAPE avoids this distortion while MAE, RMSE, and R2 still evaluate all rows.
+
+Q136. What if the panel asks whether the model can handle a future outage?
+A. Yes, as long as the outage is entered in the planned outage workbook. The forecast allocation and capacity limits use those unit statuses.
+
+Q137. What if the panel asks what happens if the outage workbook is wrong?
+A. The forecast will follow the provided outage assumptions. If the planned outage input is wrong, the forecast may also be wrong. That is why operational inputs should be updated before forecasting.
+
+Q138. What if the panel asks how accurate the July 1 forecast is?
+A. The forecast output is a day-ahead forecast for 2025-07-01. Its total cascade values range from about 569.455 MW to 581.435 MW. Accuracy for that specific day depends on the actual observed July 1 generation records, while model reliability is measured using the testing period from April to June 2025.
+
+Q139. What if the panel asks why the manuscript says the model supports capacity nomination?
+A. Capacity nomination needs a reliable estimate of expected generation. The model provides hourly plant and cascade generation forecasts while considering unit availability, so it can support day-ahead planning and reduce conservative or repeated re-nominations.
+
+Q140. What is your strongest closing answer?
+A. The strongest point is that the model was evaluated on unseen chronological testing data and achieved 2.519 percent average testing MAPE, 1.355 MW MAE, 3.575 MW RMSE, and 0.925 R2. This shows that the RBFNN did not just fit historical data; it generalized well to later operating periods and outperformed the benchmark models.
+
+
+MEMORIZE THESE NUMBERS
+
+Cleaned dataset:
+- 13,128 hourly rows
+- 55 columns
+- latest timestamp: 2025-06-30 23:00:00
+
+Split:
+- 70 percent training
+- 15 percent validation
+- 15 percent testing
+
+Average RBFNN validation:
+- MAPE: 2.615 percent
+- MAE: 1.633 MW
+- RMSE: 3.789 MW
+- R2: 0.878
+
+Average RBFNN testing:
+- MAPE: 2.519 percent
+- MAE: 1.355 MW
+- RMSE: 3.575 MW
+- R2: 0.925
+
+Best plant by testing MAPE:
+- Agus 4: 0.611 percent
+
+Highest RBFNN testing MAPE:
+- Agus 7: 4.209 percent
+- Agus 5: 4.040 percent
+
+Benchmark average testing:
+- RBFNN MAPE: 2.519 percent
+- Random Forest MAPE: 5.864 percent
+- XGBoost MAPE: 8.876 percent
+
+Day-ahead forecast:
+- Date: 2025-07-01
+- Total cascade range: 569.455 MW to 581.435 MW
+- Total cascade average: 574.445 MW
+
+
+FINAL CLOSING SCRIPT
+
+In conclusion, Cell 1 ensures that the raw hydropower records are transformed into a clean, hourly, physically consistent dataset. Cell 2 then uses this dataset to train a cascade-aware and outage-aware RBFNN model for each Agus plant. The model predicts next-hour generation changes, applies validation-based calibration, and produces a recursive 24-hour day-ahead forecast. The testing results show strong generalization, with an average testing MAPE of 2.519 percent and R2 of 0.925, outperforming Random Forest and XGBoost. Therefore, the proposed RBFNN framework is a practical and accurate tool for short-term generation forecasting and day-ahead planning in the Agus cascaded hydropower system.

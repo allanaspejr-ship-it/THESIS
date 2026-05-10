@@ -1,12 +1,12 @@
 HYDROPOWER FORECASTING SYSTEM USER GUIDE
 
-This guide is for Windows users who will run the hydropower forecasting system using VS Code.
+This guide is for Windows users who will run the hydropower forecasting system using the graphical dashboard or VS Code.
 
 You do not need programming experience.
 
 Follow the steps slowly.
 Click what the guide says.
-Type the commands exactly.
+Type commands exactly when commands are needed.
 Press Enter after each command.
 
 
@@ -21,50 +21,59 @@ HYDROPOWER FORECASTING SYSTEM USER GUIDE
 2. PROJECT OVERVIEW
 ====================================================
 
-This system forecasts next-day hydropower generation for the Agus plants.
+This system forecasts next-day hydropower generation for the Agus hydropower plants.
 
-This means the system uses past data to estimate how much power the Agus hydropower plants may generate tomorrow.
-
-The system uses AI.
-
-The main AI model is called:
+The main AI model is:
 
 RBFNN
 
 RBFNN means Radial Basis Function Neural Network.
 
-You do not need to understand the math to use the system.
+The system can:
 
-The system can do these tasks:
+1. Clean raw Excel data.
+2. Train the RBFNN AI model.
+3. Forecast day-ahead hydropower generation.
+4. Edit planned unit outages.
+5. Generate forecast charts and result files.
+6. Compare the RBFNN with benchmark models through scripts.
+7. Open a graphical dashboard for easier daily use.
 
-1. Clean the raw data.
-2. Train the AI model.
-3. Forecast hydropower generation.
-4. Generate graphs and results.
-5. Compare the AI model with benchmark models.
+The dashboard is the recommended way to use the system for daily forecasting.
 
-Important folders:
+The dashboard uses the final RBFNN workflow only.
+
+Benchmark models are still available in the scripts for thesis comparison, but they are not part of the main dashboard workflow.
+
+
+Important folders and files:
 
 data
-- This is where you put the raw Excel data file.
+- Put the raw Excel data file here.
 
 scripts
-- This contains the Python files that run the system.
+- Contains Python files that run cleaning, forecasting, benchmarks, and thesis figures.
 
 models
-- This stores trained AI model files.
+- Stores trained RBFNN model files.
 
 outputs
-- This stores cleaned data, outage files, and forecast results.
+- Stores cleaned data, planned outage files, and forecast results.
 
 metadata
-- This stores metrics and model information.
+- Stores metrics and model information.
 
 benchmark
-- This stores Random Forest and XGBoost benchmark results.
+- Stores Random Forest and XGBoost benchmark results.
 
 thesis_figures
-- This stores graphs and figures for the thesis.
+- Stores graphs and figures for the thesis.
+
+streamlit_app.py
+- Main graphical dashboard file.
+
+RUN_DASHBOARD.bat
+- Windows launcher for the dashboard.
 
 
 ====================================================
@@ -79,17 +88,16 @@ A. Install Python
 https://www.python.org/downloads/
 
 3. Download the 64-bit Windows installer for Python 3.11.
-4. Wait for the installer to download.
-5. Open the installer.
-6. IMPORTANT: Check the box that says:
+4. Open the installer.
+5. IMPORTANT: Check the box:
 
 Add Python to PATH
 
-7. Click Install Now.
-8. Wait for the installation to finish.
-9. Click Close.
+6. Click Install Now.
+7. Wait until installation finishes.
+8. Click Close.
 
-To check if Python is installed:
+To check Python:
 
 1. Open VS Code later.
 2. Open the terminal.
@@ -98,32 +106,23 @@ To check if Python is installed:
 python --version
 
 4. Press Enter.
-5. If you see Python 3.11, Python is installed.
-
-Important:
 
 Use 64-bit Python 3.11 on Windows.
 
 
 B. Install VS Code
 
-1. Open your web browser.
+1. Open your browser.
 2. Go to:
 
 https://code.visualstudio.com/
 
-3. Click Download for Windows.
-4. Wait for the installer to download.
-5. Open the installer.
-6. Click Next.
-7. Accept the agreement.
-8. Click Next.
-9. Click Install.
-10. Wait for the installation to finish.
-11. Open VS Code.
+3. Download VS Code for Windows.
+4. Install it.
+5. Open VS Code.
 
 
-C. Install Excel
+C. Install Excel or LibreOffice
 
 You need a program that can open Excel files.
 
@@ -132,40 +131,37 @@ Use one of these:
 Microsoft Excel
 LibreOffice Calc
 
-If Microsoft Excel is already installed, you can use it.
-
 
 ====================================================
 4. INSTALL VS CODE EXTENSIONS
 ====================================================
 
 1. Open VS Code.
-2. Look at the left side of the screen.
-3. Click the Extensions icon.
-4. The Extensions icon looks like four small squares.
-5. In the search box, type:
+2. Click the Extensions icon on the left side.
+3. Search for:
 
 Python
 
-6. Click the Python extension by Microsoft.
-7. Click Install.
-8. In the search box, type:
+4. Install the Python extension by Microsoft.
+5. Search for:
 
 Pylance
 
-9. Click the Pylance extension by Microsoft.
-10. Click Install.
+6. Install the Pylance extension by Microsoft.
 
-Only these extensions are required:
+Required extensions:
 
 Python
 Pylance
 
-These extensions are also recommended:
+Recommended extensions:
 
 Jupyter
 Python Debugger
 YAML
+Excel Viewer
+Data Wrangler
+Rainbow CSV
 
 
 ====================================================
@@ -175,14 +171,13 @@ YAML
 1. Open VS Code.
 2. Click File.
 3. Click Open Folder.
-4. Find and select the folder:
+4. Select:
 
 Thesis Forecasting
 
 5. Click Select Folder.
-6. Wait for VS Code to open the folder.
 
-After opening the folder, you should see folders like:
+After opening, you should see:
 
 data
 scripts
@@ -191,6 +186,8 @@ outputs
 metadata
 benchmark
 thesis_figures
+streamlit_app.py
+RUN_DASHBOARD.bat
 
 Important:
 
@@ -202,58 +199,52 @@ That folder is one level above Thesis Forecasting.
 6. OPEN TERMINAL
 ====================================================
 
-1. In VS Code, look at the top menu.
-2. Click Terminal.
-3. Click New Terminal.
-4. A terminal will open at the bottom of VS Code.
+1. In VS Code, click Terminal.
+2. Click New Terminal.
+3. A terminal will open at the bottom.
 
-This guide uses the terminal to run commands.
-
-When the guide says "type this", click inside the terminal first.
-
-Then type the command.
-
-Then press Enter.
+When this guide says "type this", click inside the terminal first.
 
 
 ====================================================
 7. INSTALL REQUIRED LIBRARIES
 ====================================================
 
-Libraries are extra tools that Python needs to run the forecasting system.
+Libraries are extra Python tools needed by the system.
 
-1. Make sure the terminal is open.
-2. Click inside the terminal.
-3. Type this:
+1. Open the terminal.
+2. Type:
 
 python -m pip install --upgrade pip setuptools wheel
 
-4. Press Enter.
-5. Wait until it finishes.
+3. Press Enter.
+4. Wait until it finishes.
 
-Then install the required libraries.
-
-If VS Code opened the Thesis Forecasting folder, type this:
+If VS Code opened the Thesis Forecasting folder, type:
 
 python -m pip install -r ../requirements.txt
 
 Press Enter.
 
-Wait until it finishes.
-
-This may take several minutes.
-
-If VS Code opened the main HYDRO_FORECASTING folder instead, use this command:
+If VS Code opened the main HYDRO_FORECASTING folder, type:
 
 python -m pip install -r requirements.txt
 
 Press Enter.
 
-If the command says the file is missing, use this longer command:
+If the requirements command says the file is missing, type:
 
-python -m pip install numpy pandas openpyxl pyarrow joblib scikit-learn tensorflow xgboost matplotlib plotly streamlit jupyter ipykernel
+python -m pip install numpy pandas openpyxl pyarrow joblib scikit-learn tensorflow xgboost matplotlib plotly streamlit watchdog jupyter ipykernel
 
 Press Enter.
+
+Important:
+
+The dashboard needs Streamlit.
+
+If the dashboard does not open, install Streamlit:
+
+python -m pip install streamlit
 
 
 ====================================================
@@ -262,244 +253,475 @@ Press Enter.
 
 The system needs an Excel data file before it can run.
 
-1. Find your Excel data file.
-2. The expected file name is:
+Expected file name:
 
 DATA(JAN2024-JUNE2025).xlsx
 
-3. Copy the file.
-4. Open the project folder:
-
-Thesis Forecasting
-
-5. Open the folder:
-
-data
-
-6. Paste the Excel file inside:
-
-Thesis Forecasting/data/
-
-The final file location should be:
+Put the file here:
 
 Thesis Forecasting/data/DATA(JAN2024-JUNE2025).xlsx
 
+Steps:
+
+1. Find your Excel data file.
+2. Copy the file.
+3. Open:
+
+Thesis Forecasting/data/
+
+4. Paste the Excel file there.
+
 
 ====================================================
-9. RUN THE SYSTEM (FULL PROCESS)
+9. OPEN THE GRAPHICAL DASHBOARD (RECOMMENDED)
 ====================================================
 
-Use this full process when running the system for the first time.
+The dashboard is the easiest way to use the forecasting system.
 
-Make sure VS Code has opened the folder:
+
+OPTION A: Open using RUN_DASHBOARD.bat
+
+1. Open the folder:
 
 Thesis Forecasting
 
-Make sure the terminal is open.
+2. Double-click:
+
+RUN_DASHBOARD.bat
+
+3. A terminal window will open.
+4. Wait for the dashboard to open in your browser.
+
+The dashboard should open at:
+
+http://localhost:8501
+
+If the browser does not open automatically:
+
+1. Open your browser.
+2. Go to:
+
+http://localhost:8501
+
+
+OPTION B: Open using VS Code terminal
+
+1. Open VS Code.
+2. Open the folder:
+
+Thesis Forecasting
+
+3. Open the terminal.
+4. Type:
+
+streamlit run streamlit_app.py
+
+5. Press Enter.
+
+If that command does not work, type:
+
+python -m streamlit run streamlit_app.py
+
+Important:
+
+Keep the terminal open while using the dashboard.
+
+If you close the terminal, the dashboard will stop.
+
+
+====================================================
+10. DASHBOARD PAGES
+====================================================
+
+The dashboard has five pages:
+
+1. Dashboard Overview
+2. Data Management
+3. Planned Outage Planning
+4. RBFNN Forecasting
+5. System Information
+
+
+DASHBOARD OVERVIEW
+
+This page is for checking the current system status.
+
+It shows:
+
+Total Cascade Forecast
+Peak Cascade Output
+Unavailable Unit-Hours
+Latest Cleaned Timestamp
+Latest Forecast Timestamp
+Hourly plant generation chart
+Daily plant total chart
+Recent activity and file status
+
+Use this page to quickly check if the system already has cleaned data, outage input, and forecast output.
+
+
+DATA MANAGEMENT
+
+This page is for raw data and data cleaning.
+
+Actions:
+
+Upload Excel File Optional
+Refresh Data From Disk
+Run Data Cleaning
+
+Use this page when:
+
+new raw Excel data was added
+cleaned data is missing
+you need to update the cleaned dataset
+
+The Run Data Cleaning button runs:
+
+python scripts/cell1_clean_data.py
+
+Data cleaning creates or updates:
+
+outputs/cleaned_data/cleaned_hourly_data.xlsx
+outputs/cleaned_data/cleaned_hourly_data.parquet
+outputs/cleaned_data/cell1_metadata.json
+outputs/outages_planning/Planned_Outages_Input.xlsx
+
+
+PLANNED OUTAGE PLANNING
+
+This page is for editing unit availability.
+
+Use:
+
+1 = ON / available / running
+0 = OFF / unavailable / planned outage
+
+This page edits:
+
+outputs/outages_planning/Planned_Outages_Input.xlsx
+
+Buttons:
+
+Save Outage Plan
+- Saves the outage values you entered.
+
+Forecast Day-Ahead
+- Saves the outage plan and runs the RBFNN day-ahead forecast.
+
+Retrain RBFNN Model
+- Retrains the RBFNN model.
+- Use only when needed.
+
+Important:
+
+For normal daily use, click Forecast Day-Ahead.
+
+Do not click Retrain RBFNN Model unless new data was added, model files were deleted, or accuracy needs improvement.
+
+
+RBFNN FORECASTING
+
+This page shows the forecast results.
+
+It loads:
+
+outputs/rbfnn_forecast/Day_Ahead_24H_RBFNN_Forecast.xlsx
+outputs/rbfnn_forecast/Day_Ahead_24H_RBFNN_Forecast.csv
+
+It shows:
+
+Total Cascade Forecast
+Peak Cascade Output
+Affected Plants
+Forecast Generated
+Forecast Table
+Hourly generation chart
+Daily total generation chart
+
+You can download:
+
+Forecast Excel
+Forecast CSV
+
+
+SYSTEM INFORMATION
+
+This page shows:
+
+Forecasting workflow
+File status overview
+Python version
+Streamlit version
+Forecast model
+Forecast horizon
+Timezone
+Last system check
+
+Use this page when checking if required files are available.
+
+
+====================================================
+11. DAILY USE USING THE DASHBOARD
+====================================================
+
+Use this workflow for normal daily forecasting.
+
+1. Open the dashboard.
+
+Use either:
+
+RUN_DASHBOARD.bat
+
+or:
+
+streamlit run streamlit_app.py
+
+2. Go to:
+
+Data Management
+
+3. Check if raw Excel data and cleaned data are available.
+
+4. If new raw data was added, click:
+
+Run Data Cleaning
+
+5. Go to:
+
+Planned Outage Planning
+
+6. Edit unit availability values.
+
+Use:
+
+1 = ON
+0 = OFF
+
+7. Click:
+
+Save Outage Plan
+
+8. Click:
+
+Forecast Day-Ahead
+
+9. Wait until the forecast finishes.
+
+10. Go to:
+
+RBFNN Forecasting
+
+11. Review the forecast table and charts.
+
+12. Download the Excel or CSV forecast if needed.
+
+
+Dashboard daily workflow summary:
+
+Open dashboard
+Data Management
+Run Data Cleaning if needed
+Planned Outage Planning
+Edit outage values
+Save Outage Plan
+Forecast Day-Ahead
+RBFNN Forecasting
+View and download forecast
+
+
+====================================================
+12. RUN THE SYSTEM BY TERMINAL (FULL PROCESS)
+====================================================
+
+Use this full terminal process when running the system for the first time or when preparing thesis outputs.
+
+Make sure VS Code opened:
+
+Thesis Forecasting
 
 
 STEP 1: Clean Data
 
-1. Click inside the terminal.
-2. Type this:
+Type:
 
 python scripts/cell1_clean_data.py
 
-3. Press Enter.
-4. Wait until it finishes.
+Press Enter.
 
-This step creates:
-
-cleaned data
-outage template
-
-Example outputs:
+This creates:
 
 cleaned_hourly_data.xlsx
 cleaned_hourly_data.parquet
 Planned_Outages_Input.xlsx
 
 
-STEP 2: Train AI Model
+STEP 2: Train RBFNN AI Model
 
-1. Click inside the terminal.
-2. Type this:
+Type:
 
 python scripts/cell2_rbfnn.py --train
 
-3. Press Enter.
-4. Wait until it finishes.
+Press Enter.
 
-This step will:
+This trains the RBFNN model, saves model files, creates metrics, and creates forecast outputs.
 
-train the AI model
-save model files
-create metrics
-create forecast outputs
-
-This may take time.
+Training may take time.
 
 
 STEP 3: Run Benchmark Models
 
-1. Click inside the terminal.
-2. Type this:
+Type:
 
 python scripts/cell3_benchmark.py --train
 
-3. Press Enter.
-4. Wait until it finishes.
+Press Enter.
 
-This step runs comparison models.
-
-The benchmark models are:
+This runs:
 
 Random Forest
 XGBoost
 
+Use this step for thesis comparison.
 
-STEP 4: Generate Figures and Metrics
 
-1. Click inside the terminal.
-2. Type this:
+STEP 4: Generate Thesis Figures and Metrics
+
+Type:
 
 python scripts/cell4_generate_thesis_and_metrics.py
 
-3. Press Enter.
-4. Wait until it finishes.
+Press Enter.
 
-This step creates graphs and organized results.
+This creates graphs and organized results.
 
 
 ====================================================
-10. FORECAST ONLY (NO RETRAINING)
+13. FORECAST ONLY BY TERMINAL (NO RETRAINING)
 ====================================================
 
-Use this for daily forecasting.
+Use this for daily forecasting if you do not use the dashboard.
 
-If models already exist, DO NOT retrain.
+If models already exist, do not retrain.
 
 Do not type --train for daily use.
 
 To forecast only:
 
-1. Click inside the terminal.
-2. Type this:
-
 python scripts/cell2_rbfnn.py
-
-3. Press Enter.
-4. Wait until it finishes.
 
 Optional benchmark forecast:
 
-1. Click inside the terminal.
-2. Type this:
-
 python scripts/cell3_benchmark.py
-
-3. Press Enter.
-4. Wait until it finishes.
 
 
 ====================================================
-11. RETRAIN MODEL (WHEN NEEDED)
+14. RETRAIN MODEL
 ====================================================
 
 Only retrain when needed.
 
-Retrain only if:
+Retrain if:
 
 new data was added
 model files were deleted
 accuracy needs improvement
 
-To retrain:
+Dashboard retraining:
 
-1. Click inside the terminal.
-2. Type this:
+1. Open the dashboard.
+2. Go to Planned Outage Planning.
+3. Click Retrain RBFNN Model.
+
+Terminal retraining:
 
 python scripts/cell2_rbfnn.py --train
 
-3. Press Enter.
-4. Wait until it finishes.
-
-Training may take longer than forecasting.
-
-For daily use, use forecast-only instead.
+For daily use, use Forecast Day-Ahead or forecast-only instead.
 
 
 ====================================================
-12. EDIT PLANNED OUTAGE
+15. EDIT PLANNED OUTAGE BY EXCEL
 ====================================================
 
 The planned outage file tells the system which units are ON or OFF.
 
-First, run Step 1 from the full process if the outage file does not exist yet.
-
-Open this file:
+File:
 
 outputs/outages_planning/Planned_Outages_Input.xlsx
 
-Steps:
-
-1. Open the outputs folder.
-2. Open the outages_planning folder.
-3. Open Planned_Outages_Input.xlsx.
-4. Edit the values.
-
-Use these values:
+Use:
 
 1 = ON
 0 = OFF
 
-5. Save the Excel file.
-6. Close Excel.
-7. Go back to VS Code.
-8. Open the terminal.
-9. Run forecast again:
+Steps:
+
+1. Open:
+
+outputs/outages_planning/Planned_Outages_Input.xlsx
+
+2. Edit values.
+3. Save the Excel file.
+4. Close Excel.
+5. Run the forecast again.
+
+Terminal command:
 
 python scripts/cell2_rbfnn.py
-
-10. Press Enter.
 
 Important:
 
 Always close Excel before running the script.
 
+If you are using the dashboard, edit planned outages directly on the Planned Outage Planning page.
+
 
 ====================================================
-13. WHERE TO FIND RESULTS
+16. WHERE TO FIND RESULTS
 ====================================================
 
-Forecast results are here:
+RBFNN forecast results:
 
 outputs/rbfnn_forecast/
 
-Benchmark results are here:
+Main forecast files:
+
+outputs/rbfnn_forecast/Day_Ahead_24H_RBFNN_Forecast.xlsx
+outputs/rbfnn_forecast/Day_Ahead_24H_RBFNN_Forecast.csv
+
+Benchmark results:
 
 benchmark/random_forest/
 benchmark/xgboost/
 
-Figures are here:
+Figures:
 
 thesis_figures/
 
-Metrics are here:
+Metrics:
 
 metadata/
 
-Cleaned data is usually here:
+Cleaned data:
 
 outputs/cleaned_data/
 
-Planned outage file is usually here:
+Planned outage file:
 
 outputs/outages_planning/
 
+Dashboard:
+
+streamlit_app.py
+
+Dashboard launcher:
+
+RUN_DASHBOARD.bat
+
 
 ====================================================
-14. UPDATE FIGURES
+17. UPDATE FIGURES
 ====================================================
 
 Use this when you want to update thesis graphs and metrics.
@@ -507,20 +729,17 @@ Use this when you want to update thesis graphs and metrics.
 1. Open VS Code.
 2. Open the Thesis Forecasting folder.
 3. Open the terminal.
-4. Type this:
+4. Type:
 
 python scripts/cell4_generate_thesis_and_metrics.py
 
 5. Press Enter.
-6. Wait until it finishes.
 
-This will overwrite old figures.
-
-It will not create duplicate copies.
+This overwrites old thesis figures and organized metric files.
 
 
 ====================================================
-15. COMMON ERRORS (AND FIX)
+18. COMMON ERRORS AND FIXES
 ====================================================
 
 Error:
@@ -552,11 +771,8 @@ The project should use 64-bit Python 3.11 on Windows.
 Fix:
 
 Install 64-bit Python 3.11.
-During installation, check:
-
-Add Python to PATH
-
-Then restart VS Code.
+Check Add Python to PATH.
+Restart VS Code.
 
 
 Error:
@@ -573,23 +789,68 @@ A required library is missing.
 
 Fix:
 
-Open the terminal and type:
-
 python -m pip install --upgrade pip setuptools wheel
 
-Press Enter.
-
-Then type:
+Then:
 
 python -m pip install -r ../requirements.txt
 
-Press Enter.
+If the requirements command fails:
 
-If the requirements command says the file is missing, type:
+python -m pip install numpy pandas openpyxl pyarrow joblib scikit-learn tensorflow xgboost matplotlib plotly streamlit watchdog jupyter ipykernel
 
-python -m pip install numpy pandas openpyxl pyarrow joblib scikit-learn tensorflow xgboost matplotlib plotly streamlit jupyter ipykernel
 
-Press Enter.
+Error:
+
+streamlit is not recognized
+
+Meaning:
+
+Streamlit is missing or Windows cannot find it.
+
+Fix:
+
+python -m pip install streamlit
+
+Then run:
+
+python -m streamlit run streamlit_app.py
+
+
+Error:
+
+Dashboard does not open in browser
+
+Meaning:
+
+The dashboard server may be running, but the browser did not open automatically.
+
+Fix:
+
+Open your browser and go to:
+
+http://localhost:8501
+
+
+Error:
+
+Port 8501 is already in use
+
+Meaning:
+
+Another Streamlit dashboard is already running.
+
+Fix:
+
+Close the old terminal window.
+
+If it still happens, run:
+
+python -m streamlit run streamlit_app.py --server.port 8502
+
+Then open:
+
+http://localhost:8502
 
 
 Error:
@@ -604,26 +865,22 @@ Fix:
 
 Save the Excel file.
 Close Excel.
-Run the command again.
+Run again.
 
 
 Error:
 
-Missing file
+Missing raw Excel file
 
 Meaning:
 
-The file is not in the correct folder.
+The data file is not in the correct folder.
 
 Fix:
 
-Check that the data file is inside:
+Check that the file is here:
 
-Thesis Forecasting/data/
-
-Check that the file name is:
-
-DATA(JAN2024-JUNE2025).xlsx
+Thesis Forecasting/data/DATA(JAN2024-JUNE2025).xlsx
 
 
 Error:
@@ -634,9 +891,12 @@ Meaning:
 
 The system needs cleaned data first.
 
-Fix:
+Fix in dashboard:
 
-Run:
+Go to Data Management.
+Click Run Data Cleaning.
+
+Fix in terminal:
 
 python scripts/cell1_clean_data.py
 
@@ -647,82 +907,129 @@ Missing model files
 
 Meaning:
 
-The model has not been trained yet, or files were deleted.
+The model has not been trained yet, or model files were deleted.
 
 Fix:
-
-Run:
 
 python scripts/cell2_rbfnn.py --train
 
 
-====================================================
-16. DAILY USE WORKFLOW
-====================================================
+Error:
 
-Use these steps for normal daily forecasting.
+Dashboard says forecast file is missing
 
-1. Open VS Code.
-2. Click File.
-3. Click Open Folder.
-4. Select:
+Meaning:
 
-Thesis Forecasting
+The RBFNN forecast has not been generated yet.
 
-5. Click Terminal.
-6. Click New Terminal.
-7. Edit the outage file if needed:
+Fix in dashboard:
 
-outputs/outages_planning/Planned_Outages_Input.xlsx
+Go to Planned Outage Planning.
+Click Forecast Day-Ahead.
 
-8. Save the outage file.
-9. Close Excel.
-10. Go back to VS Code.
-11. Click inside the terminal.
-12. Type this:
+Fix in terminal:
 
 python scripts/cell2_rbfnn.py
 
-13. Press Enter.
-14. Wait until it finishes.
-15. Open the forecast Excel output in:
+
+====================================================
+19. DAILY USE WORKFLOW
+====================================================
+
+RECOMMENDED DASHBOARD WORKFLOW
+
+1. Double-click:
+
+RUN_DASHBOARD.bat
+
+2. Go to:
+
+Data Management
+
+3. Run cleaning only if raw data was updated.
+
+4. Go to:
+
+Planned Outage Planning
+
+5. Edit unit availability.
+
+6. Click:
+
+Save Outage Plan
+
+7. Click:
+
+Forecast Day-Ahead
+
+8. Go to:
+
+RBFNN Forecasting
+
+9. View or download the forecast.
+
+
+TERMINAL WORKFLOW
+
+1. Open VS Code.
+2. Open:
+
+Thesis Forecasting
+
+3. Open terminal.
+4. Edit outage file if needed:
+
+outputs/outages_planning/Planned_Outages_Input.xlsx
+
+5. Save and close Excel.
+6. Run:
+
+python scripts/cell2_rbfnn.py
+
+7. Open results in:
 
 outputs/rbfnn_forecast/
 
 
 ====================================================
-17. IMPORTANT NOTES
+20. IMPORTANT NOTES
 ====================================================
 
-Do NOT delete folders.
+Do not delete folders.
 
-Do NOT move files.
+Do not move files.
 
-Do NOT rename files unless you know what you are doing.
+Do not rename files unless you know what you are doing.
 
-Always close Excel before running the scripts.
+Always close Excel before running scripts.
 
-Use forecast-only for daily use.
+Keep the dashboard terminal open while using the dashboard.
+
+Use Forecast Day-Ahead for daily dashboard use.
+
+Use forecast-only for daily terminal use.
 
 Use training only when needed.
 
+Use Retrain RBFNN Model only when new data or deleted model files require retraining.
+
 Keep a backup copy of the raw Excel data file.
 
-Keep the data folder.
+Keep these folders:
 
-Keep the scripts folder.
+data
+scripts
+models
+outputs
+metadata
+benchmark
+thesis_figures
 
-Keep the models folder.
+Most common dashboard daily button:
 
-Keep the outputs folder.
+Forecast Day-Ahead
 
-Keep the metadata folder.
-
-Keep the benchmark folder.
-
-Keep the thesis_figures folder.
-
-The most common daily command is:
+Most common terminal daily command:
 
 python scripts/cell2_rbfnn.py
 
