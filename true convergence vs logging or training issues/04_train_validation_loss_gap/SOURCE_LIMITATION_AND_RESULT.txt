@@ -1,0 +1,1 @@
+Raw train-loss and validation-loss values per epoch were not found in the current metadata folder. Archived loss-curve PNGs were copied here. The gap CSV summarizes validation vs testing performance differences as supporting evidence, but it is not a replacement for raw epoch-level loss history.

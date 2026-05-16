@@ -1,0 +1,1 @@
+The dense output-layer kernel and bias values were extracted from the saved RBFNN H5 files. Finite, non-empty output weights support that the model learned a mapping from RBF activations to the target.

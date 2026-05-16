@@ -1,0 +1,1 @@
+The extracted H5 model files contain finite RBF center matrices and positive gamma/spread values. This supports the conclusion that the RBF hidden layer was constructed and saved correctly.

@@ -1,0 +1,1 @@
+The copied and generated plots compare actual hydropower generation against RBFNN forecasts. These plots verify whether the flat loss behavior still produced forecasts that track the observed generation profile.
