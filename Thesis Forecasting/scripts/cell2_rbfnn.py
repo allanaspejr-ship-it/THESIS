@@ -36,6 +36,7 @@ np.random.seed(42)
 tf.get_logger().setLevel("ERROR")
 tf.random.set_seed(42)
 
+# Defines project paths for cleaned data, saved RBFNN models, metrics, and forecast outputs.
 PROJECT_DIR = Path(__file__).resolve().parents[2]
 THESIS_DIR = Path(__file__).resolve().parents[1]
 OPT_DIR = THESIS_DIR
@@ -71,6 +72,7 @@ for folder in [
 CLEAN_PATH = CLEANED_DATA_DIR / "cleaned_hourly_data.parquet"
 PLANNED_PATH = OUTAGES_DIR / "Planned_Outages_Input.xlsx"
 
+# Stores plant structure, capacities, output schemas, and model search settings.
 PLANTS = ["agus1", "agus2", "agus4", "agus5", "agus6", "agus7"]
 UPSTREAM_MAP = {"agus1": None, "agus2": "agus1", "agus4": "agus2", "agus5": "agus4", "agus6": "agus5", "agus7": "agus6"}
 CAPACITY_MW = {"agus1": 80.0, "agus2": 180.0, "agus4": 158.1, "agus5": 55.0, "agus6": 219.0, "agus7": 54.0}
@@ -138,6 +140,7 @@ FORECAST_PROFILE_BLEND_FALLBACK = {
 }
 
 
+# Saves Keras models safely and falls back to H5 if the target file is locked.
 def atomic_save_keras_model(model, path):
     temp_path = path.with_name(f"{path.stem}.tmp{path.suffix}")
     if temp_path.exists():
@@ -151,6 +154,7 @@ def atomic_save_keras_model(model, path):
         model.save(path.with_suffix(".h5"))
 
 
+# Formats Excel outputs for easier review and thesis reporting.
 def format_excel(path):
     try:
         from openpyxl import load_workbook
@@ -168,6 +172,7 @@ def format_excel(path):
     wb.save(path)
 
 
+# Saves epoch-by-epoch training and validation loss history.
 def save_training_history(history, plant):
     history_df = pd.DataFrame(history.history)
     history_df.insert(0, "epoch", np.arange(1, len(history_df) + 1))
@@ -177,6 +182,7 @@ def save_training_history(history, plant):
     return history_path
 
 
+# Resolves current model artifacts first, then legacy artifacts if needed.
 def model_file(name):
     current = MODEL_DIR / name
     current_h5 = current.with_suffix(".h5")
@@ -193,6 +199,7 @@ def model_file(name):
     return current
 
 
+# Rebuilds the hourly datetime column from public date and time fields.
 def rebuild_datetime(df):
     out = df.copy()
     out["date"] = pd.to_datetime(out["date"])
@@ -204,6 +211,7 @@ def rebuild_datetime(df):
     return out.sort_values("datetime").reset_index(drop=True)
 
 
+# Adds legacy-compatible aliases expected by older saved models.
 def add_runtime_compatibility_columns(df):
     # Thesis Forecasting cleaned files use public names; legacy saved models may expect old feature names.
     out = df.copy()
@@ -217,6 +225,7 @@ def add_runtime_compatibility_columns(df):
     return out
 
 
+# Implements the Gaussian radial basis hidden layer used by the RBFNN.
 class RBFLayer(tf.keras.layers.Layer):
     def __init__(self, units, gamma_init=1.0, **kwargs):
         super().__init__(**kwargs)
@@ -240,6 +249,7 @@ class RBFLayer(tf.keras.layers.Layer):
         return tf.exp(-tf.exp(self.log_gamma) * d2)
 
 
+# Builds the RBFNN with an RBF hidden layer and linear output layer.
 def build_model(input_dim, n_centers=N_CENTERS, learning_rate=LEARNING_RATE):
     inputs = tf.keras.Input(shape=(input_dim,))
     x = RBFLayer(n_centers, gamma_init=1.0)(inputs)
@@ -249,6 +259,7 @@ def build_model(input_dim, n_centers=N_CENTERS, learning_rate=LEARNING_RATE):
     return model
 
 
+# Initializes RBF centers using K-means clusters from the scaled training data.
 def init_centers(model, x_train, n_centers=N_CENTERS):
     n_clusters = min(n_centers, len(x_train))
     km = KMeans(n_clusters=n_clusters, random_state=42, n_init=5)
@@ -262,10 +273,12 @@ def init_centers(model, x_train, n_centers=N_CENTERS):
             return
 
 
+# Sets the minimum actual-generation level for meaningful MAPE calculation.
 def operational_threshold(plant):
     return max(1.0, 0.01 * CAPACITY_MW[plant])
 
 
+# Computes MAPE only on operational rows to avoid near-zero percentage distortion.
 def operational_mape(y_true, y_pred, plant):
     y_true = np.asarray(y_true, dtype=float)
     y_pred = np.asarray(y_pred, dtype=float)
@@ -276,6 +289,7 @@ def operational_mape(y_true, y_pred, plant):
     return float(value), int(mask.sum()), int((~mask).sum())
 
 
+# Collects validation/testing metrics used in Chapter 4 tables.
 def metrics_dict(y_true, y_pred, plant):
     mape, included, excluded = operational_mape(y_true, y_pred, plant)
     return {
@@ -288,6 +302,7 @@ def metrics_dict(y_true, y_pred, plant):
     }
 
 
+# Splits each plant series chronologically into training, validation, and testing sets.
 def chronological_split(data):
     n = len(data)
     i1 = int(n * TRAIN_RATIO)
@@ -295,6 +310,7 @@ def chronological_split(data):
     return data.iloc[:i1].copy(), data.iloc[i1:i2].copy(), data.iloc[i2:].copy()
 
 
+# Builds time, lag, rolling, unit-share, outage, and upstream cascade features.
 def add_features(df):
     out = df.copy()
     out["datetime"] = pd.to_datetime(out["datetime"])
@@ -362,6 +378,7 @@ def add_features(df):
     return out
 
 
+# Selects the feature columns used by one plant-specific RBFNN model.
 def feature_columns_for(data, plant):
     target = f"total_gen_{plant}"
     cols = [
@@ -392,6 +409,7 @@ def feature_columns_for(data, plant):
     return list(dict.fromkeys([c for c in cols if c in data.columns]))
 
 
+# Saves daily error summaries for validation or testing splits.
 def save_daily_metrics(part_df, y_true, y_pred, plant, path):
     temp = part_df[["datetime"]].copy()
     temp["actual"] = np.asarray(y_true, dtype=float)
@@ -405,6 +423,7 @@ def save_daily_metrics(part_df, y_true, y_pred, plant, path):
     pd.DataFrame(rows).to_excel(path, index=False)
 
 
+# Converts predicted residual deltas back to level forecasts and tunes bias.
 def calibrated_level_predictions(current, delta_pred, actual, plant, shrinkage):
     raw_pred = np.clip(current + shrinkage * delta_pred, 0.0, CAPACITY_MW[plant] * 1.05)
     bias = float(np.median(np.asarray(actual, dtype=float) - raw_pred))
@@ -414,20 +433,24 @@ def calibrated_level_predictions(current, delta_pred, actual, plant, shrinkage):
     return pred, bias
 
 
+# Applies the saved residual shrinkage and bias correction during evaluation or forecasting.
 def apply_level_prediction(current, delta_pred, plant, shrinkage, bias):
     pred = np.clip(current + shrinkage * delta_pred + bias, 0.0, CAPACITY_MW[plant] * 1.05)
     return pred
 
 
+# Creates quantile bins for value-based calibration.
 def calibration_bins(values, q):
     _, bins = pd.qcut(pd.Series(values), q, duplicates="drop", retbins=True)
     return np.asarray(bins, dtype=float)
 
 
+# Assigns values to calibration bins.
 def bin_ids(values, bins):
     return np.digitize(np.asarray(values, dtype=float), bins[1:-1])
 
 
+# Applies saved bin-level forecast corrections.
 def apply_bin_calibration(pred, basis_values, plant, calibration):
     if not calibration:
         return np.asarray(pred, dtype=float)
@@ -439,6 +462,7 @@ def apply_bin_calibration(pred, basis_values, plant, calibration):
     return np.clip(np.asarray(pred, dtype=float) + scale * adjustment, 0.0, CAPACITY_MW[plant] * 1.05)
 
 
+# Tunes value-bin calibration on validation predictions for selected plants.
 def tune_bin_calibration(plant, current, actual, base_pred):
     if plant not in BIN_CALIBRATION_PLANTS:
         return None, base_pred
@@ -460,16 +484,19 @@ def tune_bin_calibration(plant, current, actual, base_pred):
     return best["calibration"], best["pred"]
 
 
+# Ranks candidate configurations by MAPE, then RMSE and R2.
 def candidate_score(metrics):
     mape = metrics["operational_mape"]
     mape_score = float(mape) if pd.notna(mape) else float("inf")
     return (mape_score, metrics["rmse"], -metrics["r2"])
 
 
+# Gets the forecast target hour for each validation or testing row.
 def target_hours_from_rows(df):
     return ((pd.to_numeric(df["time"]).astype(int) % 24) + 1).astype(int).values
 
 
+# Uses same-hour-yesterday generation as a shape anchor when available.
 def same_hour_target_anchor(df, plant):
     target = f"total_gen_{plant}"
     col = f"{target}_target_lag24"
@@ -478,6 +505,7 @@ def same_hour_target_anchor(df, plant):
     return df[target].shift(23).values.astype(float)
 
 
+# Applies hourly residual corrections learned from validation behavior.
 def apply_hourly_correction(pred, hours, plant, correction):
     out = np.asarray(pred, dtype=float).copy()
     if not correction:
@@ -488,6 +516,7 @@ def apply_hourly_correction(pred, hours, plant, correction):
     return np.clip(out + scale * offsets, 0.0, CAPACITY_MW[plant] * 1.05)
 
 
+# Tunes hour-specific residual corrections for shape-optimized plants.
 def tune_hourly_correction(plant, pred, actual, hours):
     if plant not in SHAPE_OPTIMIZED_PLANTS:
         return None, np.asarray(pred, dtype=float)
@@ -508,6 +537,7 @@ def tune_hourly_correction(plant, pred, actual, hours):
     return best["correction"], best["pred"]
 
 
+# Blends forecasts toward same-hour-yesterday shape anchors.
 def apply_profile_blend(pred, anchor, plant, config):
     pred = np.asarray(pred, dtype=float)
     anchor = np.asarray(anchor, dtype=float)
@@ -520,6 +550,7 @@ def apply_profile_blend(pred, anchor, plant, config):
     return np.clip(blended, 0.0, CAPACITY_MW[plant] * 1.05)
 
 
+# Tunes same-hour-yesterday profile blending on validation data.
 def tune_profile_blend(plant, pred, actual, anchor):
     if plant not in SHAPE_OPTIMIZED_PLANTS:
         return None, np.asarray(pred, dtype=float)
@@ -536,6 +567,7 @@ def tune_profile_blend(plant, pred, actual, anchor):
     return best["config"], best["pred"]
 
 
+# Measures forecast shape behavior beyond standard point-error metrics.
 def shape_metrics(y_true, y_pred):
     y_true = np.asarray(y_true, dtype=float)
     y_pred = np.asarray(y_pred, dtype=float)
@@ -557,22 +589,26 @@ def shape_metrics(y_true, y_pred):
     }
 
 
+# Extracts the unit number from an outage/status column.
 def unit_from_outage_col(col):
     match = re.search(r"unit\d+", col)
     return match.group(0) if match else None
 
 
+# Reads the latest unit availability from historical cleaned data.
 def latest_status(hist_df, plant):
     cols = [c for c in hist_df.columns if re.fullmatch(fr"out_{plant}_unit\d+", c)]
     latest = hist_df.iloc[-1]
     return {c: float(latest[c]) for c in cols}
 
 
+# Reads planned unit availability for one forecast hour.
 def planned_status(planned, idx, plant):
     cols = [c for c in planned.columns if re.fullmatch(fr"out_{plant}_unit\d+", c)]
     return {c: float(planned.loc[idx, c]) for c in cols}
 
 
+# Compares planned available capacity against the latest observed baseline.
 def availability_ratio(plant, baseline, planned):
     if not planned:
         return 1.0
@@ -589,14 +625,17 @@ def availability_ratio(plant, baseline, planned):
     return plan_cap / base_cap
 
 
+# Lists unit-generation columns for one plant.
 def unit_generation_columns(plant):
     return [f"gen_{plant}_{unit}" for unit in UNIT_CAPACITY[plant]]
 
 
+# Builds the matching outage/status column name for one plant unit.
 def unit_status_col(plant, unit):
     return f"out_{plant}_{unit}"
 
 
+# Sums available unit capacity under the planned outage status.
 def available_capacity(plant, status):
     return sum(
         capacity
@@ -605,6 +644,7 @@ def available_capacity(plant, status):
     )
 
 
+# Computes historical unit generation shares within a plant total.
 def _unit_share_frame(plant, hist):
     unit_cols = unit_generation_columns(plant)
     total = hist[f"total_gen_{plant}"].replace(0, np.nan)
@@ -612,6 +652,7 @@ def _unit_share_frame(plant, hist):
     return shares.replace([np.inf, -np.inf], np.nan)
 
 
+# Learns unit allocation weights from recent, current, and same-hour unit shares.
 def learned_unit_weights(plant, hist, status, forecast_hour):
     unit_cols = unit_generation_columns(plant)
     available_cols = [
@@ -663,6 +704,7 @@ def learned_unit_weights(plant, hist, status, forecast_hour):
     return weights
 
 
+# Allocates a plant-level forecast to available units without exceeding capacities.
 def allocate_with_unit_caps(plant, total_generation, weights, status):
     unit_values = {col: 0.0 for col in unit_generation_columns(plant)}
     available_cols = [
@@ -704,11 +746,13 @@ def allocate_with_unit_caps(plant, total_generation, weights, status):
     return unit_values
 
 
+# Distributes one plant forecast into unit-level generation values.
 def distribute_to_units(plant, plant_forecast, status, hist, forecast_hour):
     weights = learned_unit_weights(plant, hist, status, forecast_hour)
     return allocate_with_unit_caps(plant, plant_forecast, weights, status)
 
 
+# Enforces outages, unit caps, and plant-total consistency in the forecast table.
 def validate_and_fix_unit_forecast(forecast, planned):
     for idx in forecast.index:
         for plant in PLANTS:
@@ -737,6 +781,7 @@ def validate_and_fix_unit_forecast(forecast, planned):
     return forecast
 
 
+# Checks that hourly outage statuses are reflected in unit and cascade totals.
 def validate_hourly_outage_effect(forecast_df, outage_df):
     warnings_found = 0
     for idx in forecast_df.index:
@@ -797,6 +842,7 @@ def validate_hourly_outage_effect(forecast_df, outage_df):
         print("Hourly outage validation passed.")
 
 
+# Creates an empty 24-hour forecast table with all plant/unit outputs.
 def empty_forecast_frame(planned):
     forecast = pd.DataFrame({"Date": planned["Date"].dt.date, "Hour": planned["Hour"].astype(int)})
     for col in UNIT_FORECAST_COLUMNS + TOTAL_FORECAST_COLUMNS:
@@ -805,11 +851,13 @@ def empty_forecast_frame(planned):
     return forecast
 
 
+# Converts 1-24 forecast hours into display labels.
 def display_hour(hour):
     hour0 = int(hour) - 1
     return "00:00" if hour0 == 0 else f"{hour0}:00"
 
 
+# Converts planned outage hour values into internal 1-24 format.
 def parse_planned_hour(value):
     if isinstance(value, str):
         text = value.strip()
@@ -821,6 +869,7 @@ def parse_planned_hour(value):
     return int(pd.to_numeric(value))
 
 
+# Converts internal forecast column names into readable output headers.
 def forecast_display_column(col):
     unit_match = re.fullmatch(r"gen_agus(\d+)_(unit\d+)", col)
     if unit_match:
@@ -836,6 +885,7 @@ def forecast_display_column(col):
     return col
 
 
+# Formats the final forecast workbook columns and hour labels.
 def format_forecast_output(forecast):
     formatted = forecast.copy()
     formatted["Hour"] = formatted["Hour"].apply(display_hour)
@@ -843,11 +893,13 @@ def format_forecast_output(forecast):
     return formatted
 
 
+# Estimates a plant-specific ramp limit from historical generation changes.
 def ramp_limit(train_series):
     diffs = train_series.diff().abs().dropna()
     return float(max(1.0, diffs.quantile(0.98))) if not diffs.empty else 2.0
 
 
+# Loads and standardizes the 24-hour planned outage input workbook.
 def load_planned():
     planned = pd.read_excel(PLANNED_PATH)
     planned.columns = [str(c).strip() for c in planned.columns]
@@ -860,12 +912,14 @@ def load_planned():
     return planned
 
 
+# Predicts next-hour generation delta and converts it back from scaled units.
 def predict_delta(model, x_scaler, y_scaler, x_frame):
     x_scaled = x_scaler.transform(x_frame.values.astype(np.float32)).astype(np.float32)
     y_scaled = model(x_scaled, training=False).numpy()
     return y_scaler.inverse_transform(y_scaled).flatten()
 
 
+# Builds one forecast feature row from the latest historical data.
 def feature_row_from_history(hist, plant, x_cols, date_val, hour_val):
     hist_feat = add_features(hist.copy())
     row = hist_feat.iloc[-1].to_dict()
@@ -888,6 +942,7 @@ def feature_row_from_history(hist, plant, x_cols, date_val, hour_val):
     return pd.DataFrame([{c: row.get(c, 0.0) if pd.notna(row.get(c, 0.0)) else 0.0 for c in x_cols}])
 
 
+# Applies saved shape adjustments during recursive 24-hour forecasting.
 def apply_forecast_shape_adjustments(base_pred, hist, plant, hour_i, meta):
     if plant not in SHAPE_OPTIMIZED_PLANTS:
         return base_pred
@@ -903,6 +958,7 @@ def apply_forecast_shape_adjustments(base_pred, hist, plant, hour_i, meta):
     return adjusted
 
 
+# Generates the recursive 24-hour RBFNN forecast with outage-aware unit allocation.
 def forecast_24h(raw_df, planned):
     forecast = empty_forecast_frame(planned)
     hist = raw_df.copy()
@@ -957,6 +1013,7 @@ def forecast_24h(raw_df, planned):
     return validate_and_fix_unit_forecast(forecast, planned)
 
 
+# Loads optional actual next-day generation for post-forecast diagnostics.
 def load_actual_next_day_generation(path):
     if not path.exists():
         return None
@@ -979,6 +1036,7 @@ def load_actual_next_day_generation(path):
     return actual
 
 
+# Saves actual-vs-forecast diagnostics when the next-day actual file is available.
 def save_actual_forecast_diagnostics(forecast):
     actual = load_actual_next_day_generation(ACTUAL_NEXT_DAY_PATH)
     if actual is None or actual.empty:
@@ -1039,6 +1097,7 @@ def save_actual_forecast_diagnostics(forecast):
     print("Saved actual-vs-forecast diagnostics:", out_path)
 
 
+# Loads cleaned data and planned outages required by RBFNN workflows.
 def load_latest_inputs():
     if not CLEAN_PATH.exists() or not PLANNED_PATH.exists():
         raise FileNotFoundError("Run Thesis Forecasting/scripts/cell1_clean_data.py first.")
@@ -1049,6 +1108,7 @@ def load_latest_inputs():
     return raw_df, planned
 
 
+# Recomputes validation/testing metrics from saved RBFNN models.
 def evaluate_saved_models(raw_df):
     feat_df = add_features(raw_df)
     summary_rows = []
@@ -1136,6 +1196,7 @@ def evaluate_saved_models(raw_df):
     print("Saved:", predictions_path)
 
 
+# Uses saved RBFNN models to evaluate metrics and generate a day-ahead forecast.
 def run_forecast_only():
     raw_df, planned = load_latest_inputs()
     evaluate_saved_models(raw_df)
@@ -1151,6 +1212,7 @@ def run_forecast_only():
     print("Saved:", csv_path)
 
 
+# Trains/tunes RBFNN models, saves metrics/artifacts, and generates forecasts.
 def run_training_and_forecast():
     raw_df, planned = load_latest_inputs()
     selected_plants = [arg.lower() for arg in sys.argv[sys.argv.index("--train") + 1:] if not arg.startswith("--")]
@@ -1385,6 +1447,7 @@ def run_training_and_forecast():
     print("Saved:", testing_path)
 
 
+# Selects training mode when --train is passed; otherwise runs forecast-only mode.
 def main():
     if "--train" in sys.argv:
         run_training_and_forecast()

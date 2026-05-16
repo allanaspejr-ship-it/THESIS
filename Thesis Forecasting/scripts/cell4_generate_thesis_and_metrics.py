@@ -16,11 +16,13 @@ from openpyxl import load_workbook
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
+# Defines metadata and figure locations used for thesis-ready outputs.
 BASE_DIR = Path(__file__).resolve().parents[1]
 METADATA_DIR = BASE_DIR / "metadata"
 OVERALL_METRICS_DIR = METADATA_DIR / "overall_metrics"
 THESIS_FIGURES_DIR = BASE_DIR / "thesis_figures"
 
+# Stores plant labels, model source files, and figure output folders.
 PLANTS = ["agus1", "agus2", "agus4", "agus5", "agus6", "agus7"]
 PLANT_LABELS = {
     "agus1": "Agus 1",
@@ -59,6 +61,7 @@ FIGURE_DIRS = {
 SAVED_OUTPUTS = []
 
 
+# Creates all figure and organized metadata output folders.
 def ensure_dirs():
     for path in FIGURE_DIRS.values():
         path.mkdir(parents=True, exist_ok=True)
@@ -67,17 +70,20 @@ def ensure_dirs():
     (METADATA_DIR / "overall_comparison").mkdir(parents=True, exist_ok=True)
 
 
+# Tracks saved files in the console output.
 def save_path(path):
     SAVED_OUTPUTS.append(path)
     print(f"Saved: {path}")
 
 
+# Stops figure or table generation when a required source file is missing.
 def require_file(path):
     if not path.exists():
         raise FileNotFoundError(f"Required file not found: {path}")
     return path
 
 
+# Rebuilds a sortable datetime column from available date and hour fields.
 def rebuild_datetime(df):
     out = df.copy()
     if "datetime" in out.columns:
@@ -106,6 +112,7 @@ def rebuild_datetime(df):
     return out.sort_values("datetime").reset_index(drop=True)
 
 
+# Formats Excel outputs for readability in thesis appendices and tables.
 def format_excel(path):
     wb = load_workbook(path)
     for ws in wb.worksheets:
@@ -119,6 +126,7 @@ def format_excel(path):
     wb.save(path)
 
 
+# Saves a dataframe to Excel and applies workbook formatting.
 def save_excel(df, path, sheet_name="Sheet1"):
     path.parent.mkdir(parents=True, exist_ok=True)
     with pd.ExcelWriter(path, engine="openpyxl") as writer:
@@ -127,6 +135,7 @@ def save_excel(df, path, sheet_name="Sheet1"):
     save_path(path)
 
 
+# Saves the current Matplotlib figure using thesis figure settings.
 def save_figure(path):
     path.parent.mkdir(parents=True, exist_ok=True)
     plt.tight_layout()
@@ -135,6 +144,7 @@ def save_figure(path):
     save_path(path)
 
 
+# Loads the cleaned hourly dataset used for Chapter 4 profile figures.
 def read_cleaned_data():
     parquet_path = BASE_DIR / "outputs" / "cleaned_data" / "cleaned_hourly_data.parquet"
     xlsx_path = BASE_DIR / "outputs" / "cleaned_data" / "cleaned_hourly_data.xlsx"
@@ -147,12 +157,14 @@ def read_cleaned_data():
     return rebuild_datetime(df)
 
 
+# Reads model-level validation and testing metrics.
 def read_metrics(model_name):
     df = pd.read_excel(require_file(MODEL_FILES[model_name]["metrics"]))
     df["plant"] = pd.Categorical(df["plant"], categories=PLANTS, ordered=True)
     return df.sort_values("plant").reset_index(drop=True)
 
 
+# Reads testing predictions and sorts them by plant and time.
 def read_predictions(model_name):
     df = pd.read_excel(require_file(MODEL_FILES[model_name]["predictions"]))
     df = rebuild_datetime(df)
@@ -160,6 +172,7 @@ def read_predictions(model_name):
     return df.sort_values(["plant", "datetime"]).reset_index(drop=True)
 
 
+# Converts validation/testing metric columns into one common table schema.
 def normalized_metric_frames(metrics_df, model_name):
     base = metrics_df.copy()
     base["model"] = model_name
@@ -182,6 +195,7 @@ def normalized_metric_frames(metrics_df, model_name):
     return validation, testing
 
 
+# Generates cleaned hydropower generation profile figures per plant.
 def generate_cleaned_profile_figures():
     df = read_cleaned_data()
     for idx, plant in enumerate(PLANTS, start=1):
@@ -197,6 +211,7 @@ def generate_cleaned_profile_figures():
         save_figure(FIGURE_DIRS["cleaned_profiles"] / f"figure_4_{idx:02d}_{plant}_cleaned_profile.png")
 
 
+# Generates actual-versus-RBFNN forecast plots for testing data.
 def generate_testing_actual_vs_forecast_figures():
     df = read_predictions("RBFNN")
     for offset, plant in enumerate(PLANTS, start=13):
@@ -212,6 +227,7 @@ def generate_testing_actual_vs_forecast_figures():
         save_figure(FIGURE_DIRS["testing_actual_vs_forecast"] / f"figure_4_{offset:02d}_{plant}_testing_actual_vs_forecast.png")
 
 
+# Computes plant-level MAPE from actual and predicted testing values.
 def plant_mape(df):
     rows = []
     for plant in PLANTS:
@@ -224,6 +240,7 @@ def plant_mape(df):
     return pd.DataFrame(rows)
 
 
+# Generates scatter, residual, and MAPE plots for RBFNN error analysis.
 def generate_error_analysis_figures():
     df = read_predictions("RBFNN")
     actual = df["actual_generation"].astype(float)
@@ -260,6 +277,7 @@ def generate_error_analysis_figures():
     save_figure(FIGURE_DIRS["error_analysis"] / "rbfnn_testing_mape_per_plant.png")
 
 
+# Generates RBFNN, Random Forest, and XGBoost comparison bar charts.
 def generate_benchmark_comparison_figures():
     all_metrics = pd.concat([read_metrics(model) for model in MODEL_FILES], ignore_index=True)
     model_order = ["RBFNN", "Random Forest", "XGBoost"]
@@ -280,6 +298,7 @@ def generate_benchmark_comparison_figures():
         save_figure(FIGURE_DIRS["benchmark_comparison"] / filename)
 
 
+# Reads one day-ahead forecast workbook for cascade-level plotting.
 def read_day_ahead_forecast(path, model_name):
     df = pd.read_excel(require_file(path))
     df = rebuild_datetime(df)
@@ -289,6 +308,7 @@ def read_day_ahead_forecast(path, model_name):
     return df[["datetime", "Total_Cascade_Generation_MW", "model"]]
 
 
+# Generates the total cascade day-ahead comparison figure.
 def generate_day_ahead_forecast_figure():
     forecasts = [
         read_day_ahead_forecast(BASE_DIR / "outputs" / "rbfnn_forecast" / "Day_Ahead_24H_RBFNN_Forecast.xlsx", "RBFNN"),
@@ -306,6 +326,7 @@ def generate_day_ahead_forecast_figure():
     save_figure(FIGURE_DIRS["day_ahead_forecast"] / "total_cascade_day_ahead_forecast_with_benchmarks.png")
 
 
+# Combines plant-level RBFNN daily metrics into one organized workbook.
 def write_rbfnn_daily_metrics(split):
     frames = []
     source_dir = METADATA_DIR / f"{split}_metrics"
@@ -320,6 +341,7 @@ def write_rbfnn_daily_metrics(split):
     save_excel(combined, MODEL_FILES["RBFNN"]["folder"] / f"{split}_daily_metrics.xlsx")
 
 
+# Writes organized per-model metadata tables and testing predictions.
 def write_model_metadata():
     for model_name, spec in MODEL_FILES.items():
         metrics = read_metrics(model_name)
@@ -338,6 +360,7 @@ def write_model_metadata():
         save_excel(predictions, spec["folder"] / "testing_predictions.xlsx")
 
 
+# Writes overall model comparison and best-model summary workbooks.
 def write_overall_comparison():
     validation_frames = []
     testing_frames = []
@@ -371,6 +394,7 @@ def write_overall_comparison():
     save_excel(best, overall_dir / "best_model_summary.xlsx")
 
 
+# Runs all thesis figure and organized metadata generation steps.
 def main():
     ensure_dirs()
     generate_cleaned_profile_figures()

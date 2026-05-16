@@ -21,6 +21,7 @@ np.random.seed(42)
 # PATH CONFIG — VS CODE LOCAL PATHS
 # ============================================================
 
+# Defines input/output locations and cleaning thresholds used by Cell 1.
 PROJECT_DIR = Path(__file__).resolve().parents[2]
 THESIS_DIR = Path(__file__).resolve().parents[1]
 RAW_DATA_DIR = THESIS_DIR / "data"
@@ -55,6 +56,7 @@ for k, v in CONFIG["dirs"].items():
 # HELPERS
 # ============================================================
 
+# Converts raw Excel header text into safe lowercase column names.
 def sanitize_name(x):
     if pd.isna(x):
         return None
@@ -67,6 +69,7 @@ def sanitize_name(x):
     return x if x else None
 
 
+# Builds one usable column name from the source file's three header rows.
 def flatten_three_row_header(raw_df):
     h0 = raw_df.iloc[0].ffill()
     h1 = raw_df.iloc[1].ffill()
@@ -100,6 +103,7 @@ def flatten_three_row_header(raw_df):
     return final
 
 
+# Renames raw plant, unit, gate, elevation, and outage columns into consistent model names.
 def standardize_columns(df):
     renamed = {}
     for c in df.columns:
@@ -162,6 +166,7 @@ def standardize_columns(df):
     return df.rename(columns=renamed)
 
 
+# Combines source date and hour fields into one sortable hourly timestamp.
 def build_datetime(df):
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df["time"] = pd.to_numeric(df["time"], errors="coerce")
@@ -171,6 +176,7 @@ def build_datetime(df):
     return df.sort_values("datetime").reset_index(drop=True)
 
 
+# Finds consecutive True/1 blocks for missing-value and zero-run cleaning.
 def run_lengths(mask):
     arr = np.asarray(mask).astype(int)
     runs = []
@@ -189,10 +195,12 @@ def run_lengths(mask):
     return runs
 
 
+# Fills short missing gaps while leaving longer data gaps for later imputation.
 def interpolate_short_missing(s, max_gap):
     return s.interpolate(method="linear", limit=max_gap, limit_direction="both")
 
 
+# Treats short zero runs as missing but preserves long zero runs as real shutdowns.
 def interpolate_short_zero_runs(s, short_max, long_min):
     s = s.copy()
     zero_mask = s.fillna(np.nan).eq(0)
@@ -206,6 +214,7 @@ def interpolate_short_zero_runs(s, short_max, long_min):
     return s.interpolate(method="linear", limit_direction="both")
 
 
+# Replaces isolated spikes with a local average when they exceed the configured threshold.
 def smooth_spikes(s, factor):
     s = s.copy()
 
@@ -222,16 +231,19 @@ def smooth_spikes(s, factor):
     return s
 
 
+# Extracts the Agus plant identifier from a column name.
 def plant_from_col(c):
     m = re.search(r"(agus[124567])", c)
     return m.group(1) if m else None
 
 
+# Extracts the unit identifier from a column name.
 def unit_from_col(c):
     m = re.search(r"(unit\d+)", c)
     return m.group(1) if m else None
 
 
+# Maps internal cleaned names to the final public output column names.
 def final_clean_column_renames():
     renames = {
         "lake_lanao_hourly_outflow_elev_agus7": "lake_lanao_outflow",
@@ -247,6 +259,7 @@ def final_clean_column_renames():
     return renames
 
 
+# Prepares the saved cleaned file while keeping date and time usable downstream.
 def prepare_cleaned_output(clean_df):
     # Public cleaned files no longer expose datetime, but model scripts rebuild it from date + time.
     out = clean_df.rename(columns=final_clean_column_renames()).copy()
@@ -255,11 +268,13 @@ def prepare_cleaned_output(clean_df):
     return out
 
 
+# Formats an hourly timestamp for the outage template.
 def display_hour(timestamp):
     hour = pd.Timestamp(timestamp).hour
     return "00:00" if hour == 0 else f"{hour}:00"
 
 
+# Applies basic workbook formatting for readable Excel outputs.
 def format_excel(path):
     try:
         from openpyxl import load_workbook
@@ -279,6 +294,7 @@ def format_excel(path):
     wb.save(path)
 
 
+# Finds the configured raw workbook or the first available Excel file in the data folder.
 def resolve_input_file():
     configured = CONFIG["input_file"]
     if configured.exists():
@@ -304,6 +320,7 @@ def resolve_input_file():
 # ============================================================
 
 def main():
+    # Loads the raw workbook and converts its multi-row header into standard columns.
     input_file = resolve_input_file()
 
     print("Loading raw Excel file:")
@@ -322,6 +339,7 @@ def main():
 
     df = build_datetime(df)
 
+    # Groups source columns by purpose so each data type can be cleaned correctly.
     gen_unit_cols = [c for c in df.columns if c.startswith("gen_agus") and "unit" in c]
     out_unit_cols = [c for c in df.columns if c.startswith("out_agus") and "unit" in c]
     spill_cols = [c for c in df.columns if c.startswith("spill_agus") and "gate" in c]
@@ -338,6 +356,7 @@ def main():
     print("Rain cols:", rain_cols)
     print("Outflow cols:", outflow_cols)
 
+    # Cleans unit generation values, including short gaps, short zeros, and spikes.
     for c in gen_unit_cols:
         s = df[c].astype(float).copy()
         s = s.mask(s <= CONFIG["approx_zero_threshold"], 0.0)
@@ -351,6 +370,7 @@ def main():
         s = s.mask(s <= CONFIG["approx_zero_threshold"], 0.0)
         df[c] = s
 
+    # Cleans gate-related values and prevents physically invalid negative openings.
     for c in spill_cols + tot_gate_cols:
         s = df[c].astype(float).copy()
         s = s.mask(s < 0, 0.0)
@@ -363,6 +383,7 @@ def main():
         )
         df[c] = s
 
+    # Cleans elevation, rainfall, and outflow series before final imputation.
     for c in elev_cols + rain_cols + outflow_cols:
         s = df[c].astype(float).copy()
         if c in rain_cols:
@@ -373,6 +394,7 @@ def main():
 
     num_cols = [c for c in df.columns if c not in ["date", "time", "datetime"]]
 
+    # Fills remaining numeric gaps using neighboring feature patterns.
     if df[num_cols].isna().sum().sum() > 0:
         imputer = KNNImputer(
             n_neighbors=CONFIG["knn_neighbors"],
@@ -380,11 +402,13 @@ def main():
         )
         df[num_cols] = imputer.fit_transform(df[num_cols])
 
+    # Recomputes total plant generation from cleaned unit generation values.
     for p in CONFIG["plants"]:
         unit_cols = [c for c in gen_unit_cols if plant_from_col(c) == p]
         if unit_cols:
             df[f"total_gen_{p}"] = df[unit_cols].sum(axis=1)
 
+    # Derives binary unit-running status from cleaned generation where possible.
     for gcol in gen_unit_cols:
         p = plant_from_col(gcol)
         u = unit_from_col(gcol)
@@ -400,6 +424,7 @@ def main():
         if len(match) == 1:
             df[match[0]] = np.where(df[gcol] > 0, 1, 0)
 
+    # Standardizes all outage/status fields to 1 for available and 0 for unavailable.
     for c in out_unit_cols:
         df[c] = np.where(
             pd.to_numeric(df[c], errors="coerce").fillna(0) > 0,
@@ -407,14 +432,17 @@ def main():
             0
         )
 
+    # Resamples cleaned data to hourly frequency for forecasting scripts.
     dfh = df.set_index("datetime").sort_index()
     num_cols_h = dfh.select_dtypes(include=[np.number]).columns.tolist()
     dfh = dfh[num_cols_h].resample("h").mean()
 
+    # Restores outage/status fields as binary values after hourly averaging.
     for c in out_unit_cols:
         if c in dfh.columns:
             dfh[c] = np.where(dfh[c] >= 0.5, 1, 0)
 
+    # Recalculates plant totals after resampling to keep unit sums consistent.
     for p in CONFIG["plants"]:
         unit_cols = [
             c for c in gen_unit_cols
@@ -429,6 +457,7 @@ def main():
     dfh["datetime"] = dfh.index
     dfh = dfh.reset_index(drop=True)
 
+    # Keeps only the cleaned columns required by downstream training and forecasting.
     keep_cols = ["date", "time", "datetime"]
     keep_cols += [c for c in dfh.columns if c.startswith("gen_agus") and "unit" in c]
     keep_cols += [c for c in dfh.columns if c.startswith("total_gen_")]
@@ -445,6 +474,7 @@ def main():
     cleaned_parquet = DIRS["runtime"] / "cleaned_hourly_data.parquet"
     meta_json = DIRS["runtime"] / "cell1_metadata.json"
 
+    # Saves cleaned hourly data in both Excel and Parquet formats.
     cleaned_output_df = prepare_cleaned_output(clean_df)
     cleaned_output_df.to_excel(cleaned_xlsx, index=False)
     cleaned_output_df.to_parquet(cleaned_parquet, index=False)
@@ -473,6 +503,7 @@ def main():
     # PLANNED OUTAGE TEMPLATE
     # ========================================================
 
+    # Creates a 24-hour outage planning template from the latest unit statuses.
     df_outage = clean_df.copy()
     df_outage["datetime"] = pd.to_datetime(df_outage["datetime"])
     df_outage = df_outage.sort_values("datetime").reset_index(drop=True)

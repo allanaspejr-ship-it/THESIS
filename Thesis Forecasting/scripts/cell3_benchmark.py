@@ -20,6 +20,7 @@ from xgboost import XGBRegressor
 
 warnings.filterwarnings("ignore", category=pd.errors.PerformanceWarning)
 
+# Defines project paths for cleaned data, benchmark models, metrics, and forecast outputs.
 PROJECT_DIR = Path(__file__).resolve().parents[2]
 THESIS_DIR = Path(__file__).resolve().parents[1]
 OPT_DIR = THESIS_DIR
@@ -46,6 +47,7 @@ META_DIR.mkdir(parents=True, exist_ok=True)
 for folder in [CLEANED_DATA_DIR, OUTAGES_DIR, *BENCHMARK_OUTPUT_DIRS.values(), *MODEL_DIRS.values()]:
     folder.mkdir(parents=True, exist_ok=True)
 
+# Stores plant capacities, output schemas, feature windows, and benchmark model keys.
 PLANTS = ["agus1", "agus2", "agus4", "agus5", "agus6", "agus7"]
 METRICS_COLUMNS = [
     "model",
@@ -90,10 +92,12 @@ ROLL_WINDOWS = [3, 6, 12, 24, 48, 168]
 MODEL_KEYS = {"Random Forest": "random_forest", "XGBoost": "xgboost"}
 
 
+# Sets the minimum actual-generation level for meaningful MAPE calculation.
 def operational_threshold(plant):
     return max(1.0, 0.01 * CAPACITY_MW[plant])
 
 
+# Computes MAPE only on operational rows to avoid near-zero percentage distortion.
 def operational_mape(y_true, y_pred, plant):
     y_true = np.asarray(y_true, dtype=float)
     y_pred = np.asarray(y_pred, dtype=float)
@@ -103,6 +107,7 @@ def operational_mape(y_true, y_pred, plant):
     return float(np.mean(np.abs((y_true[mask] - y_pred[mask]) / np.abs(y_true[mask]))) * 100.0)
 
 
+# Collects benchmark validation/testing metrics for comparison with RBFNN.
 def metrics(y_true, y_pred, plant):
     return {
         "operational_mape": operational_mape(y_true, y_pred, plant),
@@ -112,6 +117,7 @@ def metrics(y_true, y_pred, plant):
     }
 
 
+# Formats Excel outputs for easier review and thesis reporting.
 def format_excel(path):
     try:
         from openpyxl import load_workbook
@@ -129,6 +135,7 @@ def format_excel(path):
     wb.save(path)
 
 
+# Rebuilds the hourly datetime column from public date and time fields.
 def rebuild_datetime(df):
     out = df.copy()
     out["date"] = pd.to_datetime(out["date"])
@@ -140,6 +147,7 @@ def rebuild_datetime(df):
     return out.sort_values("datetime").reset_index(drop=True)
 
 
+# Adds legacy-compatible aliases expected by older saved benchmark models.
 def add_runtime_compatibility_columns(df):
     # Keep Thesis Forecasting cleaned files public-facing while supporting models trained on old feature names.
     out = df.copy()
@@ -153,6 +161,7 @@ def add_runtime_compatibility_columns(df):
     return out
 
 
+# Resolves current benchmark model artifacts first, then legacy artifacts if needed.
 def model_file(model_key, name):
     current = MODEL_DIRS[model_key] / name
     if current.exists():
@@ -163,6 +172,7 @@ def model_file(model_key, name):
     return current
 
 
+# Aligns forecast features to the exact feature order saved with a model.
 def align_features(X, model_features):
     X = X.copy()
     for col in model_features:
@@ -171,6 +181,7 @@ def align_features(X, model_features):
     return X[model_features]
 
 
+# Saves each model together with the feature columns used during training.
 def model_payload(model, model_feature_columns):
     return {
         "model": model,
@@ -178,6 +189,7 @@ def model_payload(model, model_feature_columns):
     }
 
 
+# Reads a saved model payload while supporting older plain-model files.
 def unpack_model_payload(payload):
     if isinstance(payload, dict) and "model" in payload:
         return payload["model"], list(payload.get("feature_columns") or [])
@@ -186,6 +198,7 @@ def unpack_model_payload(payload):
     return payload, model_features
 
 
+# Persists one benchmark model and its feature list.
 def save_model_payload(model_key, plant, model, model_feature_columns):
     joblib.dump(
         model_payload(model, model_feature_columns),
@@ -193,6 +206,7 @@ def save_model_payload(model_key, plant, model, model_feature_columns):
     )
 
 
+# Creates the requested benchmark estimator with fixed reproducible settings.
 def make_benchmark_model(name):
     if name == "Random Forest":
         return RandomForestRegressor(n_estimators=400, min_samples_leaf=2, random_state=42, n_jobs=1)
@@ -210,6 +224,7 @@ def make_benchmark_model(name):
     raise ValueError(f"Unsupported benchmark model: {name}")
 
 
+# Trains one plant-specific benchmark model and saves it for reuse.
 def train_benchmark_model(name, plant, train, x_cols, y_col):
     model = make_benchmark_model(name)
     X_train = train[x_cols].copy()
@@ -220,6 +235,7 @@ def train_benchmark_model(name, plant, train, x_cols, y_col):
     return model_payload(model, model_feature_columns)
 
 
+# Predicts with saved feature alignment and clips outputs to plant capacity bounds.
 def predict_aligned(model_info, X, plant):
     model, model_feature_columns = unpack_model_payload(model_info)
     if not model_feature_columns:
@@ -230,6 +246,7 @@ def predict_aligned(model_info, X, plant):
     return np.clip(model.predict(X_input), 0.0, CAPACITY_MW[plant] * 1.05)
 
 
+# Builds time, lag, rolling, unit-share, and outage features for benchmark models.
 def add_features(df):
     out = df.copy()
     out["datetime"] = pd.to_datetime(out["datetime"])
@@ -263,6 +280,7 @@ def add_features(df):
     return out
 
 
+# Selects the benchmark feature columns for one plant.
 def feature_cols(df, plant):
     target = f"total_gen_{plant}"
     cols = ["hour_sin", "hour_cos", "day_of_week", "month", f"{target}_current"]
@@ -276,6 +294,7 @@ def feature_cols(df, plant):
     return [c for c in dict.fromkeys(cols) if c in df.columns]
 
 
+# Splits each plant series chronologically into training, validation, and testing sets.
 def split(data):
     n = len(data)
     i1 = int(n * 0.70)
@@ -283,22 +302,26 @@ def split(data):
     return data.iloc[:i1], data.iloc[i1:i2], data.iloc[i2:]
 
 
+# Extracts the unit number from an outage/status column.
 def unit_from_outage_col(col):
     match = re.search(r"unit\d+", col)
     return match.group(0) if match else None
 
 
+# Reads the latest unit availability from historical cleaned data.
 def latest_status(hist_df, plant):
     cols = [c for c in hist_df.columns if re.fullmatch(fr"out_{plant}_unit\d+", c)]
     latest = hist_df.iloc[-1]
     return {c: float(latest[c]) for c in cols}
 
 
+# Reads planned unit availability for one forecast hour.
 def planned_status(planned, idx, plant):
     cols = [c for c in planned.columns if re.fullmatch(fr"out_{plant}_unit\d+", c)]
     return {c: float(planned.loc[idx, c]) for c in cols}
 
 
+# Compares planned available capacity against the latest observed baseline.
 def availability_ratio(plant, baseline, planned):
     if not planned:
         return 1.0
@@ -315,14 +338,17 @@ def availability_ratio(plant, baseline, planned):
     return plan_cap / base_cap
 
 
+# Lists unit-generation columns for one plant.
 def unit_generation_columns(plant):
     return [f"gen_{plant}_{unit}" for unit in UNIT_CAPACITY[plant]]
 
 
+# Builds the matching outage/status column name for one plant unit.
 def unit_status_col(plant, unit):
     return f"out_{plant}_{unit}"
 
 
+# Sums available unit capacity under the planned outage status.
 def available_capacity(plant, status):
     return sum(
         capacity
@@ -331,12 +357,14 @@ def available_capacity(plant, status):
     )
 
 
+# Computes historical unit generation shares within a plant total.
 def _unit_share_frame(plant, hist):
     total = hist[f"total_gen_{plant}"].replace(0, np.nan)
     shares = hist[unit_generation_columns(plant)].clip(lower=0.0).div(total, axis=0)
     return shares.replace([np.inf, -np.inf], np.nan)
 
 
+# Learns unit allocation weights from recent, current, and same-hour unit shares.
 def learned_unit_weights(plant, hist, status, forecast_hour):
     unit_cols = unit_generation_columns(plant)
     available_cols = [
@@ -379,6 +407,7 @@ def learned_unit_weights(plant, hist, status, forecast_hour):
     return weights / weights.sum() if weights.sum() > 0 else weights
 
 
+# Allocates a plant-level forecast to available units without exceeding capacities.
 def allocate_with_unit_caps(plant, total_generation, weights, status):
     unit_values = {col: 0.0 for col in unit_generation_columns(plant)}
     available_cols = [
@@ -413,11 +442,13 @@ def allocate_with_unit_caps(plant, total_generation, weights, status):
     return unit_values
 
 
+# Distributes one plant forecast into unit-level generation values.
 def distribute_to_units(plant, plant_forecast, status, hist, forecast_hour):
     weights = learned_unit_weights(plant, hist, status, forecast_hour)
     return allocate_with_unit_caps(plant, plant_forecast, weights, status)
 
 
+# Enforces outages, unit caps, and plant-total consistency in the forecast table.
 def validate_and_fix_unit_forecast(forecast, planned):
     for idx in forecast.index:
         for plant in PLANTS:
@@ -443,6 +474,7 @@ def validate_and_fix_unit_forecast(forecast, planned):
     return forecast
 
 
+# Creates an empty 24-hour forecast table with all plant/unit outputs.
 def empty_forecast_frame(planned):
     forecast = pd.DataFrame({"Date": planned["Date"].dt.date, "Hour": planned["Hour"].astype(int)})
     for col in UNIT_FORECAST_COLUMNS + TOTAL_FORECAST_COLUMNS:
@@ -451,11 +483,13 @@ def empty_forecast_frame(planned):
     return forecast
 
 
+# Converts 1-24 forecast hours into display labels.
 def display_hour(hour):
     hour0 = int(hour) - 1
     return "00:00" if hour0 == 0 else f"{hour0}:00"
 
 
+# Converts planned outage hour values into internal 1-24 format.
 def parse_planned_hour(value):
     if isinstance(value, str):
         text = value.strip()
@@ -467,6 +501,7 @@ def parse_planned_hour(value):
     return int(pd.to_numeric(value))
 
 
+# Converts internal forecast column names into readable output headers.
 def forecast_display_column(col):
     unit_match = re.fullmatch(r"gen_agus(\d+)_(unit\d+)", col)
     if unit_match:
@@ -482,6 +517,7 @@ def forecast_display_column(col):
     return col
 
 
+# Formats the final forecast workbook columns and hour labels.
 def format_forecast_output(forecast):
     formatted = forecast.copy()
     formatted["Hour"] = formatted["Hour"].apply(display_hour)
@@ -489,6 +525,7 @@ def format_forecast_output(forecast):
     return formatted
 
 
+# Loads and standardizes the 24-hour planned outage input workbook.
 def load_planned():
     planned_path = OUTAGES_DIR / "Planned_Outages_Input.xlsx"
     planned = pd.read_excel(planned_path)
@@ -502,6 +539,7 @@ def load_planned():
     return planned
 
 
+# Builds one forecast feature row from the latest historical data.
 def feature_row_from_history(hist, plant, date_val, hour_val, model_features=None):
     hist_feat = add_features(hist.copy())
     x_cols = list(model_features) if model_features else feature_cols(hist_feat, plant)
@@ -517,6 +555,7 @@ def feature_row_from_history(hist, plant, date_val, hour_val, model_features=Non
     return pd.DataFrame([{c: row.get(c, 0.0) if pd.notna(row.get(c, 0.0)) else 0.0 for c in x_cols}])
 
 
+# Generates the recursive 24-hour benchmark forecast with outage-aware unit allocation.
 def forecast_benchmark_24h(raw_df, planned, models_by_plant):
     forecast = empty_forecast_frame(planned)
     hist = raw_df.copy()
@@ -562,6 +601,7 @@ def forecast_benchmark_24h(raw_df, planned, models_by_plant):
     return validate_and_fix_unit_forecast(forecast[ordered_cols], planned)
 
 
+# Saves one benchmark forecast to Excel and CSV.
 def save_forecast_outputs(forecast, model_key, safe_name):
     out_dir = BENCHMARK_OUTPUT_DIRS[model_key]
     xlsx_path = out_dir / f"Day_Ahead_24H_{safe_name}.xlsx"
@@ -580,6 +620,7 @@ def save_forecast_outputs(forecast, model_key, safe_name):
     print("Saved:", csv_path)
 
 
+# Loads cleaned data and planned outages required by benchmark workflows.
 def load_latest_inputs():
     clean_path = CLEANED_DATA_DIR / "cleaned_hourly_data.parquet"
     if not clean_path.exists():
@@ -590,6 +631,7 @@ def load_latest_inputs():
     return raw_df, planned
 
 
+# Loads all saved Random Forest and XGBoost models.
 def load_saved_benchmark_models():
     forecast_models = {"Random Forest": {}, "XGBoost": {}}
     for name, model_key in MODEL_KEYS.items():
@@ -601,6 +643,7 @@ def load_saved_benchmark_models():
     return forecast_models
 
 
+# Loads saved benchmark models or trains missing/mismatched models.
 def load_or_train_benchmark_models(raw_df):
     df = add_features(raw_df)
     forecast_models = {"Random Forest": {}, "XGBoost": {}}
@@ -634,6 +677,7 @@ def load_or_train_benchmark_models(raw_df):
     return forecast_models
 
 
+# Recomputes validation/testing metrics and testing predictions from saved models.
 def save_saved_model_metrics_and_predictions(raw_df, forecast_models):
     df = add_features(raw_df)
     rows = []
@@ -692,6 +736,7 @@ def save_saved_model_metrics_and_predictions(raw_df, forecast_models):
         print("Saved:", predictions_path)
 
 
+# Uses saved or retrained benchmark models to evaluate metrics and forecast 24 hours.
 def run_forecast_only():
     raw_df, planned = load_latest_inputs()
     forecast_models = load_or_train_benchmark_models(raw_df)
@@ -705,6 +750,7 @@ def run_forecast_only():
     print("Saved benchmark forecasts:", BENCHMARK_DIR)
 
 
+# Trains benchmark models, saves metrics/artifacts, and generates forecasts.
 def run_training_and_forecast():
     raw_df, planned = load_latest_inputs()
     df = add_features(raw_df)
@@ -779,6 +825,7 @@ def run_training_and_forecast():
     print("Saved benchmark forecasts:", BENCHMARK_DIR)
 
 
+# Selects training mode when --train is passed; otherwise runs forecast-only mode.
 def main():
     if "--train" in sys.argv:
         run_training_and_forecast()
