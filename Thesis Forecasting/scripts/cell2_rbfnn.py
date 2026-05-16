@@ -923,6 +923,11 @@ def predict_delta(model, x_scaler, y_scaler, x_frame):
 def feature_row_from_history(hist, plant, x_cols, date_val, hour_val):
     hist_feat = add_features(hist.copy())
     row = hist_feat.iloc[-1].to_dict()
+    return feature_row_from_feature_dict(row, x_cols, date_val, hour_val)
+
+
+# Builds one forecast feature row from a precomputed latest feature dictionary.
+def feature_row_from_feature_dict(row, x_cols, date_val, hour_val):
     dt = pd.to_datetime(date_val) + pd.Timedelta(hours=int(hour_val) - 1)
     hour0 = int(hour_val) - 1
     row.update({
@@ -980,12 +985,13 @@ def forecast_24h(raw_df, planned):
         new_row["date"] = pd.to_datetime(date_i)
         new_row["time"] = hour_i
         new_row["datetime"] = pd.to_datetime(date_i) + pd.Timedelta(hours=hour_i - 1)
+        latest_feature_row = add_features(hist.copy()).iloc[-1].to_dict()
 
         for plant in PLANTS:
             target = f"total_gen_{plant}"
             bundle = loaded[plant]
             meta = bundle["meta"]
-            x_row = feature_row_from_history(hist, plant, meta["X_cols"], date_i, hour_i)
+            x_row = feature_row_from_feature_dict(latest_feature_row.copy(), meta["X_cols"], date_i, hour_i)
             delta = float(predict_delta(bundle["model"], bundle["x_scaler"], bundle["y_scaler"], x_row)[0])
             last_val = float(hist[target].iloc[-1])
             base_pred = last_val + float(meta["best_shrinkage"]) * delta + float(meta.get("bias_correction_mw", 0.0))
@@ -1099,10 +1105,14 @@ def save_actual_forecast_diagnostics(forecast):
 
 # Loads cleaned data and planned outages required by RBFNN workflows.
 def load_latest_inputs():
-    if not CLEAN_PATH.exists() or not PLANNED_PATH.exists():
+    cleaned_excel = CLEANED_DATA_DIR / "cleaned_hourly_data.xlsx"
+    if not (CLEAN_PATH.exists() or cleaned_excel.exists()) or not PLANNED_PATH.exists():
         raise FileNotFoundError("Run Thesis Forecasting/scripts/cell1_clean_data.py first.")
 
-    raw_df = pd.read_parquet(CLEAN_PATH)
+    if CLEAN_PATH.exists():
+        raw_df = pd.read_parquet(CLEAN_PATH)
+    else:
+        raw_df = pd.read_excel(cleaned_excel)
     raw_df = add_runtime_compatibility_columns(rebuild_datetime(raw_df))
     planned = load_planned()
     return raw_df, planned
@@ -1196,10 +1206,28 @@ def evaluate_saved_models(raw_df):
     print("Saved:", predictions_path)
 
 
-# Uses saved RBFNN models to evaluate metrics and generate a day-ahead forecast.
+# Checks saved inputs and RBFNN artifacts required for fast forecast-only mode.
+def validate_forecast_only_inputs():
+    cleaned_excel = CLEANED_DATA_DIR / "cleaned_hourly_data.xlsx"
+    if not (CLEAN_PATH.exists() or cleaned_excel.exists()):
+        raise FileNotFoundError("Run Data Cleaning first.")
+    if not PLANNED_PATH.exists():
+        raise FileNotFoundError("Create or save Planned Outage Plan first.")
+    for plant in PLANTS:
+        required = [
+            model_file(f"meta_{plant}.json"),
+            model_file(f"rbfnn_{plant}.keras"),
+            model_file(f"x_scaler_{plant}.pkl"),
+            model_file(f"y_scaler_{plant}.pkl"),
+        ]
+        if not all(path.exists() for path in required):
+            raise FileNotFoundError("Retrain RBFNN Model first.")
+
+
+# Uses saved RBFNN models to generate only the day-ahead forecast.
 def run_forecast_only():
+    validate_forecast_only_inputs()
     raw_df, planned = load_latest_inputs()
-    evaluate_saved_models(raw_df)
     forecast = forecast_24h(raw_df, planned)
     output_forecast = format_forecast_output(forecast)
     xlsx_path = RBFNN_FORECAST_DIR / "Day_Ahead_24H_RBFNN_Forecast.xlsx"
@@ -1207,7 +1235,7 @@ def run_forecast_only():
     output_forecast.to_excel(xlsx_path, index=False)
     output_forecast.to_csv(csv_path, index=False)
     format_excel(xlsx_path)
-    print("Optimized RBFNN forecast complete")
+    print("Fast forecast-only mode complete")
     print("Saved:", xlsx_path)
     print("Saved:", csv_path)
 
@@ -1449,7 +1477,14 @@ def run_training_and_forecast():
 
 # Selects training mode when --train is passed; otherwise runs forecast-only mode.
 def main():
-    if "--train" in sys.argv:
+    args = sys.argv[1:]
+    allowed_args = {"--train", "--forecast-only"}
+    unknown = [arg for arg in args if arg.startswith("--") and arg not in allowed_args]
+    if unknown:
+        raise ValueError(f"Unsupported argument(s): {unknown}. Use --forecast-only or --train.")
+    if "--train" in args and "--forecast-only" in args:
+        raise ValueError("Use either --forecast-only or --train, not both.")
+    if "--train" in args:
         run_training_and_forecast()
     else:
         run_forecast_only()

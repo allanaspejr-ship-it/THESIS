@@ -496,6 +496,22 @@ def save_outage_plan(df: pd.DataFrame) -> None:
     st.cache_data.clear()
 
 
+def validate_fast_forecast_ready() -> None:
+    if not (CLEANED_PARQUET.exists() or CLEANED_EXCEL.exists()):
+        raise FileNotFoundError("Run Data Cleaning first.")
+    if not OUTAGE_PLAN_PATH.exists():
+        raise FileNotFoundError("Create or save Planned Outage Plan first.")
+    for plant in PLANT_LABELS:
+        model_exists = (MODELS_DIR / f"rbfnn_{plant}.keras").exists() or (MODELS_DIR / f"rbfnn_{plant}.h5").exists()
+        required = [
+            MODELS_DIR / f"meta_{plant}.json",
+            MODELS_DIR / f"x_scaler_{plant}.pkl",
+            MODELS_DIR / f"y_scaler_{plant}.pkl",
+        ]
+        if not model_exists or not all(path.exists() for path in required):
+            raise FileNotFoundError("Retrain RBFNN Model first.")
+
+
 def run_script(script_path: Path, args: list[str] | None = None) -> subprocess.CompletedProcess[str]:
     if not script_path.exists():
         raise FileNotFoundError(f"Missing script: {script_path.name}")
@@ -998,15 +1014,14 @@ def planned_outage_page() -> None:
                 st.error(str(exc))
     with button_cols[1]:
         if st.button("Forecast Day-Ahead", width="stretch"):
-            with st.spinner("Running day-ahead RBFNN forecast..."):
+            with st.spinner("Generating fast forecast-only output..."):
                 try:
                     save_outage_plan(edited)
-                    st.cache_data.clear()
-                    load_outage_plan(modified_ns(OUTAGE_PLAN_PATH))
-                    show_script_result(run_script(RBFNN_SCRIPT), "Day-ahead forecast")
+                    validate_fast_forecast_ready()
+                    show_script_result(run_script(RBFNN_SCRIPT, ["--forecast-only"]), "Day-ahead forecast")
                     st.cache_data.clear()
                     load_forecast(modified_ns(FORECAST_EXCEL))
-                    st.success("Forecast updated using the saved hourly outage plan.")
+                    st.success("Fast forecast-only mode completed using saved RBFNN models and saved outage plan.")
                 except Exception as exc:
                     st.error(str(exc))
     with button_cols[2]:

@@ -15,7 +15,7 @@ Cell 1 will use that file first. If it is missing, it will use the first non-tem
 ## Scripts
 
 - `scripts/cell1_clean_data.py` cleans raw data, prepares hourly records, saves cleaned Excel/parquet files, and creates the planned outage workbook.
-- `scripts/cell2_rbfnn.py` evaluates or trains RBFNN models, creates metrics, testing predictions, and the unit-level 24-hour RBFNN forecast.
+- `scripts/cell2_rbfnn.py` runs fast RBFNN forecast-only mode by default, or retrains/evaluates models when called with `--train`.
 - `scripts/cell3_benchmark.py` evaluates or trains Random Forest and XGBoost benchmark models, creates separated metrics files, testing predictions, and 24-hour benchmark forecasts.
 - `scripts/cell4_generate_thesis_and_metrics.py` creates thesis figures and organized metadata workbooks.
 - `scripts/cell4_testing_plots.py` reads the three testing prediction workbooks and creates full testing-split actual-vs-forecast comparison plots.
@@ -26,11 +26,13 @@ Run from the repository root:
 
 ```powershell
 python "Thesis Forecasting/scripts/cell1_clean_data.py"
-python "Thesis Forecasting/scripts/cell2_rbfnn.py"
+python "Thesis Forecasting/scripts/cell2_rbfnn.py" --forecast-only
 python "Thesis Forecasting/scripts/cell3_benchmark.py"
 python "Thesis Forecasting/scripts/cell4_generate_thesis_and_metrics.py"
 python "Thesis Forecasting/scripts/cell4_testing_plots.py"
 ```
+
+`cell2_rbfnn.py` with no arguments also runs fast forecast-only mode.
 
 Retrain intentionally:
 
@@ -38,6 +40,8 @@ Retrain intentionally:
 python "Thesis Forecasting/scripts/cell2_rbfnn.py" --train
 python "Thesis Forecasting/scripts/cell3_benchmark.py" --train
 ```
+
+Daily dashboard forecasting should use forecast-only mode. It loads saved cleaned data, saved planned outage input, and saved RBFNN model artifacts, then writes only the RBFNN forecast Excel/CSV files. It does not retrain, run cleaning, run benchmarks, regenerate thesis figures, or recompute validation/testing metrics.
 
 ## Output Conventions
 

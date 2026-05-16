@@ -168,6 +168,24 @@ Rainbow CSV
 5. OPEN THE PROJECT
 ====================================================
 
+If you received the project as a ZIP file:
+
+1. Download the ZIP file.
+2. Right-click the ZIP file.
+3. Click Extract All.
+4. Choose a folder such as Desktop or Documents.
+5. Open the extracted HYDRO_FORECASTING folder.
+
+If you received the project through GitHub:
+
+1. Open the GitHub repository page.
+2. Click Code.
+3. Click Download ZIP.
+4. Extract the ZIP file.
+5. Open the extracted HYDRO_FORECASTING folder.
+
+After downloading and extracting, open the project in VS Code:
+
 1. Open VS Code.
 2. Click File.
 3. Click Open Folder.
@@ -407,7 +425,11 @@ Save Outage Plan
 - Saves the outage values you entered.
 
 Forecast Day-Ahead
-- Saves the outage plan and runs the RBFNN day-ahead forecast.
+- Saves the outage plan and runs fast forecast-only mode.
+- It does not retrain.
+- It does not run data cleaning.
+- It does not run benchmark models.
+- It uses saved RBFNN models and the saved outage plan.
 
 Retrain RBFNN Model
 - Retrains the RBFNN model.
@@ -418,6 +440,8 @@ Important:
 For normal daily use, click Forecast Day-Ahead.
 
 Do not click Retrain RBFNN Model unless new data was added, model files were deleted, or accuracy needs improvement.
+
+Do not run data cleaning again unless the raw Excel data changed.
 
 
 RBFNN FORECASTING
@@ -487,6 +511,8 @@ Data Management
 
 Run Data Cleaning
 
+If raw data was not changed, skip data cleaning.
+
 5. Go to:
 
 Planned Outage Planning
@@ -506,7 +532,7 @@ Save Outage Plan
 
 Forecast Day-Ahead
 
-9. Wait until the forecast finishes.
+9. Wait until fast forecast-only mode finishes.
 
 10. Go to:
 
@@ -521,11 +547,11 @@ Dashboard daily workflow summary:
 
 Open dashboard
 Data Management
-Run Data Cleaning if needed
+Run Data Cleaning only if raw data changed
 Planned Outage Planning
 Edit outage values
 Save Outage Plan
-Forecast Day-Ahead
+Forecast Day-Ahead using fast forecast-only mode
 RBFNN Forecasting
 View and download forecast
 
@@ -568,6 +594,10 @@ This trains the RBFNN model, saves model files, creates metrics, and creates for
 
 Training may take time.
 
+Use this step when running the system for the first time, after adding a large amount of new historical data, or after model files were deleted.
+
+Do not use --train for normal daily forecasting.
+
 
 STEP 3: Run Benchmark Models
 
@@ -608,9 +638,31 @@ Do not type --train for daily use.
 
 To forecast only:
 
+python scripts/cell2_rbfnn.py --forecast-only
+
+You may also type:
+
 python scripts/cell2_rbfnn.py
 
-Optional benchmark forecast:
+Both commands run fast forecast-only mode.
+
+Forecast-only mode does:
+
+1. Load saved cleaned data.
+2. Load saved planned outage file.
+3. Load saved RBFNN models and scalers.
+4. Generate the 24-hour forecast.
+5. Save only the RBFNN forecast Excel and CSV files.
+
+Forecast-only mode does not:
+
+retrain the RBFNN
+run data cleaning
+run benchmark models
+regenerate thesis figures
+recompute validation/testing metrics
+
+Optional benchmark scripts should be used only for thesis comparison, not for daily forecasting:
 
 python scripts/cell3_benchmark.py
 
@@ -623,15 +675,22 @@ Only retrain when needed.
 
 Retrain if:
 
-new data was added
+new historical data was added and you want the model to learn from it
+a large new dataset was added, such as several months or one year of records
 model files were deleted
 accuracy needs improvement
+
+You do not need to retrain when only the outage plan changes.
+
+You do not need to retrain for every daily forecast.
 
 Dashboard retraining:
 
 1. Open the dashboard.
-2. Go to Planned Outage Planning.
-3. Click Retrain RBFNN Model.
+2. If raw data changed, go to Data Management.
+3. Click Run Data Cleaning.
+4. Go to Planned Outage Planning.
+5. Click Retrain RBFNN Model.
 
 Terminal retraining:
 
@@ -668,7 +727,7 @@ outputs/outages_planning/Planned_Outages_Input.xlsx
 
 Terminal command:
 
-python scripts/cell2_rbfnn.py
+python scripts/cell2_rbfnn.py --forecast-only
 
 Important:
 
@@ -929,7 +988,7 @@ Click Forecast Day-Ahead.
 
 Fix in terminal:
 
-python scripts/cell2_rbfnn.py
+python scripts/cell2_rbfnn.py --forecast-only
 
 
 ====================================================
@@ -962,6 +1021,8 @@ Save Outage Plan
 
 Forecast Day-Ahead
 
+This runs fast forecast-only mode. It does not retrain the model.
+
 8. Go to:
 
 RBFNN Forecasting
@@ -984,7 +1045,7 @@ outputs/outages_planning/Planned_Outages_Input.xlsx
 5. Save and close Excel.
 6. Run:
 
-python scripts/cell2_rbfnn.py
+python scripts/cell2_rbfnn.py --forecast-only
 
 7. Open results in:
 
@@ -1031,6 +1092,6 @@ Forecast Day-Ahead
 
 Most common terminal daily command:
 
-python scripts/cell2_rbfnn.py
+python scripts/cell2_rbfnn.py --forecast-only
 
 If you follow the steps exactly, the system can be used even without programming experience.
