@@ -77,183 +77,228 @@ st.markdown(
     """
     <style>
     :root {
-        --bg0: #020b18;
-        --bg1: #06172f;
-        --bg2: #082a57;
-        --panel: #062044;
-        --panel2: #0a3267;
-        --line: rgba(91, 166, 255, .45);
-        --line2: rgba(135, 195, 255, .26);
-        --blue: #1476ff;
-        --blue2: #1f8bff;
-        --text: #f4f9ff;
-        --muted: #b7d5f4;
-        --red: #d20f23;
-        --green: #44d487;
+        --bg0: #0a1d31;
+        --bg1: #0d2a45;
+        --panel: #061b34;
+        --panel2: #08213f;
+        --panel3: #082f63;
+        --line: rgba(59, 130, 246, .45);
+        --line2: rgba(96, 165, 250, .26);
+        --blue: #0b5ed7;
+        --blue2: #1d8cf8;
+        --text: #f8fafc;
+        --muted: #cbd5e1;
+        --soft: #94a3b8;
+        --red: #ef4444;
+        --green: #22c55e;
+        --yellow: #facc15;
+    }
+
+    html, body, [class*="css"] {
+        font-size: 16px !important;
     }
 
     html, body, .stApp {
-        background:
-            radial-gradient(circle at 75% 0%, rgba(31, 139, 255, .16), transparent 28%),
-            linear-gradient(135deg, #020b18 0%, #06172f 48%, #082a57 100%) !important;
+        background: #0a1d31 !important;
         color: var(--text);
+        font-family: "Inter", "Segoe UI", system-ui, sans-serif;
     }
 
-    .main .block-container {
-        max-width: 1500px;
-        padding: 1.05rem 1rem 1.8rem 1rem;
+    .block-container {
+        max-width: none !important;
+        width: 100% !important;
+        margin-left: 0 !important;
+        margin-right: 0 !important;
+        padding-top: 4.2rem !important;
+        padding-left: 1.5rem !important;
+        padding-right: 1.5rem !important;
+        padding-bottom: 3rem !important;
+    }
+
+    header[data-testid="stHeader"] {
+        background: transparent !important;
+        height: 2.5rem !important;
     }
 
     section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #020b18 0%, #06172f 58%, #041126 100%);
-        border-right: 1px solid rgba(135, 195, 255, .22);
-        min-width: 245px !important;
-        width: 245px !important;
+        background: #081a2c;
+        border-right: 1px solid rgba(96, 165, 250, .28);
+        min-width: 230px !important;
+        width: 230px !important;
+        box-shadow: 12px 0 28px rgba(0, 0, 0, .28);
     }
 
     section[data-testid="stSidebar"] * {
         color: var(--text) !important;
+        font-size: 15px !important;
     }
 
     section[data-testid="stSidebar"] .stRadio label {
         width: 100%;
-        min-height: 42px;
-        padding: .52rem .65rem;
-        margin: .18rem 0 .38rem 0;
+        min-height: 46px;
+        padding: .66rem .75rem;
+        margin: .24rem 0 .5rem 0;
         border-radius: 8px;
-        border: 1px solid rgba(135, 195, 255, .20);
-        background: rgba(10, 50, 103, .50);
+        border: 1px solid transparent;
+        background: transparent;
         transition: all .14s ease;
+        font-weight: 750;
+        font-size: 15px !important;
     }
 
     section[data-testid="stSidebar"] .stRadio label:hover {
-        background: rgba(20, 118, 255, .38);
-        border-color: rgba(135, 195, 255, .56);
+        background: rgba(15, 102, 216, .18);
+        border-color: rgba(96, 165, 250, .30);
     }
 
     section[data-testid="stSidebar"] .stRadio label:has(input:checked) {
-        background: linear-gradient(135deg, #1476ff, #0a5ed8);
-        border-color: rgba(210, 232, 255, .70);
-        box-shadow: 0 8px 18px rgba(20, 118, 255, .28);
+        background: linear-gradient(180deg, #0f66d8, #094fbe);
+        border-color: rgba(96, 165, 250, .58);
+        box-shadow: 0 10px 22px rgba(11, 94, 215, .28);
     }
 
     .sidebar-title {
-        font-weight: 850;
-        font-size: 1rem;
-        margin: .35rem 0 .12rem;
+        font-weight: 900;
+        font-size: 22px !important;
+        margin: 1.05rem 0 .22rem;
     }
 
     .sidebar-subtitle {
         color: var(--muted);
-        font-size: .76rem;
-        margin-bottom: 1rem;
+        font-size: 17px !important;
+        font-weight: 700;
+        margin-bottom: 1.7rem;
     }
 
     .sidebar-mini {
         color: var(--muted);
-        font-size: .78rem;
+        font-size: 14px !important;
         line-height: 1.8;
-        margin-top: 1.4rem;
+        margin-top: 1.8rem;
+        padding-top: 1.15rem;
+        border-top: 1px solid rgba(96, 165, 250, .18);
     }
 
     div[data-testid="stHorizontalBlock"] {
-        gap: 16px;
-        margin-bottom: 16px;
+        gap: 14px;
+        margin-bottom: 14px;
     }
 
-    .page-title-block {
+    .dashboard-header {
         width: 100%;
-        background: linear-gradient(90deg, #082b57, #0b3f82);
-        border: 1px solid #1e88ff;
-        border-radius: 12px;
-        padding: 22px 24px;
-        margin-bottom: 22px;
-        box-shadow: 0 0 12px rgba(30,136,255,0.18);
+        background: #082f63;
+        border: 1px solid #1d8cf8;
+        border-radius: 10px;
+        padding: 26px 30px;
+        margin-bottom: 24px;
+        box-sizing: border-box;
+        box-shadow: 0 14px 28px rgba(0, 0, 0, .22);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
     }
 
     .page-title {
         color: #ffffff;
         font-size: 30px;
-        font-weight: 800;
-        line-height: 1.2;
-        margin-bottom: 6px;
+        font-weight: 900;
+        line-height: 1.25;
+        margin: 0;
     }
 
     .page-subtitle {
-        color: #b9d9ff;
+        color: #dbeafe;
+        font-size: 16px;
+        font-weight: 500;
+        margin-top: 10px;
+    }
+
+    .dashboard-header h1 {
+        font-size: 30px;
+        font-weight: 900;
+        color: #ffffff;
+        margin: 0;
+        line-height: 1.25;
+    }
+
+    .dashboard-header p {
+        font-size: 16px;
+        color: #dbeafe;
+        margin-top: 10px;
+    }
+
+    .header-update {
+        min-width: 170px;
+        text-align: left;
+        color: #dbeafe;
         font-size: 14px;
+        line-height: 1.7;
+    }
+
+    .header-update strong {
+        display: block;
+        color: #ffffff;
+        font-size: .91rem;
         font-weight: 500;
     }
 
-    .card {
-        background: linear-gradient(180deg, rgba(10, 50, 103, .94), rgba(6, 32, 68, .96));
-        border: 1px solid var(--line);
+    .section-title-box {
+        width: 100%;
+        background: #063b73;
+        border: 1px solid #1d8cf8;
         border-radius: 8px;
-        padding: .9rem;
-        box-shadow: 0 18px 34px rgba(0, 0, 0, .18);
-        margin-bottom: 18px;
-    }
-
-    .section-header {
-        background: linear-gradient(90deg, #083b78, #0b5eb8);
-        border: 1px solid #1e88ff;
-        border-radius: 8px;
-        padding: 10px 14px;
-        margin: 20px 0 10px 0;
-        color: #ffffff !important;
-        font-size: 15px;
-        font-weight: 800;
+        padding: 12px 18px;
+        margin-top: 22px;
+        margin-bottom: 14px;
         box-sizing: border-box;
+        min-height: 46px;
+        color: #ffffff !important;
+        font-size: 20px;
+        font-weight: 900;
+        line-height: 1.2;
+        display: flex;
+        align-items: center;
     }
 
-    .section-header span {
+    .section-title-box span {
         color: #ffffff !important;
+        font-size: 20px;
+        font-weight: 900;
+        line-height: 1.2;
     }
 
     .info-card, .kpi-card, .status-card,
+    .metric-card,
     .kpi-card-light, .info-card-light, .status-card-light {
-        height: 122px;
-        background: linear-gradient(180deg, #0b2d5c 0%, #08264d 100%);
-        border: 1px solid #2f8fff;
-        border-radius: 12px;
-        padding: 18px;
         min-height: 120px;
+        background: #08213f;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 18px 20px;
         box-sizing: border-box;
         color: #ffffff !important;
         display: flex;
         flex-direction: column;
         justify-content: space-between;
-        box-shadow: 0 0 10px rgba(30,136,255,0.12);
-        margin-bottom: 16px;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04), 0 10px 22px rgba(0, 0, 0, .14);
+        margin-bottom: 0;
     }
 
     .kpi-card.red {
-        background: linear-gradient(180deg, #d20f23, #8f0818);
-        border-color: rgba(255, 170, 180, .55);
+        background: linear-gradient(180deg, #082b57 0%, #061b34 100%);
+        border-color: rgba(239, 68, 68, .55);
     }
 
     .kpi-card.light {
-        background: linear-gradient(180deg, #0b2d5c 0%, #08264d 100%);
-        border: 1px solid #2f8fff;
-        color: #ffffff !important;
-        box-shadow: 0 0 10px rgba(30,136,255,0.12);
-    }
-
-    .kpi-card-light h4,
-    .kpi-card-light h3,
-    .kpi-card-light p,
-    .info-card-light h4,
-    .info-card-light h3,
-    .info-card-light p,
-    .status-card-light h4,
-    .status-card-light h3,
-    .status-card-light p {
+        background: linear-gradient(180deg, #082b57 0%, #061b34 100%);
+        border: 1px solid var(--line);
         color: #ffffff !important;
     }
 
     .kpi-label {
-        color: #b9d9ff !important;
-        font-size: .70rem;
+        color: var(--muted) !important;
+        font-size: 14px;
         font-weight: 850;
         letter-spacing: .04em;
         text-transform: uppercase;
@@ -261,47 +306,106 @@ st.markdown(
 
     .kpi-value {
         color: #ffffff !important;
-        font-size: 1.45rem;
-        font-weight: 800;
+        font-size: 28px;
+        font-weight: 900;
         line-height: 1.1;
-        margin-top: .18rem;
+        margin-top: .45rem;
+    }
+
+    .kpi-card.red .kpi-value,
+    .value-red {
+        color: var(--red) !important;
+    }
+
+    .kpi-card.green .kpi-value,
+    .value-green {
+        color: var(--green) !important;
     }
 
     .kpi-note {
-        color: #d6e8ff !important;
-        font-size: .77rem;
-        line-height: 1.2;
+        color: #dbeafe !important;
+        font-size: 14px;
+        line-height: 1.25;
     }
 
-    .instruction {
-        background: linear-gradient(180deg, #0b3a78, #062b5b);
-        border: 1px solid rgba(91, 166, 255, .72);
+    .instruction, .info-strip, .info-box, .note-card {
+        width: 100%;
+        background: #08213f;
+        border: 1px solid rgba(59, 130, 246, 0.65);
         border-radius: 8px;
-        padding: .8rem .9rem;
-        color: #eaf5ff;
-        font-size: .86rem;
-        margin-bottom: .8rem;
+        padding: 14px 18px;
+        color: #f8fafc !important;
+        font-size: 16px;
+        font-weight: 600;
+        margin-bottom: 18px;
+        line-height: 1.45;
+        box-sizing: border-box;
     }
 
     .status-label {
-        color: #b9d9ff !important;
-        font-size: .70rem;
+        color: var(--muted) !important;
+        font-size: 14px;
         font-weight: 850;
         text-transform: uppercase;
+        letter-spacing: .04em;
     }
 
     .status-value {
-        color: #ffffff !important;
-        font-size: 1.18rem;
-        font-weight: 850;
-        margin-top: .25rem;
+        color: var(--green) !important;
+        font-size: 24px;
+        font-weight: 900;
+        margin-top: .35rem;
     }
 
     .status-note {
-        color: #d6e8ff !important;
-        font-size: .78rem;
-        margin-top: .5rem;
-        line-height: 1.28;
+        color: var(--muted) !important;
+        font-size: 14px;
+        margin-top: .7rem;
+        padding-top: .62rem;
+        border-top: 1px solid rgba(148, 163, 184, .18);
+        line-height: 1.45;
+    }
+
+    .action-card {
+        background: #08213f;
+        border: 1px solid rgba(59, 130, 246, 0.65);
+        border-radius: 10px;
+        padding: 14px 18px;
+        min-height: 96px;
+        box-sizing: border-box;
+        margin-bottom: 10px;
+    }
+
+    .action-title {
+        font-size: 18px;
+        font-weight: 900;
+        color: #ffffff;
+        margin-bottom: 10px;
+    }
+
+    .action-desc {
+        font-size: 15px;
+        line-height: 1.45;
+        color: #dbeafe;
+    }
+
+    .action-card-full {
+        background: #08213f;
+        border: 1px solid rgba(59, 130, 246, 0.65);
+        border-radius: 10px;
+        padding: 14px 18px;
+        min-height: 96px;
+        box-sizing: border-box;
+        margin-bottom: 10px;
+    }
+
+    .chart-card {
+        background: #0c2947;
+        border: 1px solid rgba(125, 190, 255, 0.85);
+        border-radius: 10px;
+        padding: 12px;
+        box-sizing: border-box;
+        min-height: 360px;
     }
 
     .workflow-card {
@@ -313,7 +417,7 @@ st.markdown(
         text-align: center;
     }
 
-    .workflow-icon {
+    .workflow-step {
         width: 42px;
         height: 42px;
         border: 1px solid rgba(135, 195, 255, .55);
@@ -330,35 +434,24 @@ st.markdown(
     .workflow-title {
         color: #ffffff;
         font-weight: 800;
-        font-size: .83rem;
+        font-size: 15px;
         margin-bottom: .25rem;
     }
 
     .workflow-note {
         color: var(--muted);
-        font-size: .72rem;
+        font-size: 14px;
         line-height: 1.25;
     }
 
     .data-note {
         color: var(--muted);
-        font-size: .84rem;
-        line-height: 1.45;
-    }
-
-    .note-card {
-        background: #dbeeff;
-        color: #06264d !important;
-        border-left: 5px solid #1e88ff;
-        border-radius: 8px;
-        padding: 14px 16px;
-        margin-top: 8px;
-        margin-bottom: 16px;
+        font-size: 14px;
         line-height: 1.45;
     }
 
     .note-card * {
-        color: #06264d !important;
+        color: #f8fafc !important;
     }
 
     .stMarkdown, p, label, span, div {
@@ -371,38 +464,42 @@ st.markdown(
 
     div.stButton > button,
     div[data-testid="stDownloadButton"] > button {
-        height: 42px;
-        border-radius: 8px;
-        border: 1px solid rgba(135, 195, 255, .60);
-        background: linear-gradient(180deg, #1476ff, #0b58cc);
-        color: #ffffff;
-        font-weight: 800;
-        box-shadow: 0 8px 18px rgba(20, 118, 255, .22);
+        width: 100% !important;
+        height: 44px !important;
+        font-size: 15px !important;
+        font-weight: 800 !important;
+        border-radius: 8px !important;
+        background: #0b5ed7 !important;
+        color: #ffffff !important;
+        border: 1px solid #1d8cf8 !important;
+        box-shadow: 0 9px 18px rgba(11, 94, 215, .24);
     }
 
     div.stButton > button:hover,
     div[data-testid="stDownloadButton"] > button:hover {
-        background: linear-gradient(180deg, #2b91ff, #1476ff);
+        background: #1d8cf8;
         border-color: rgba(225, 242, 255, .90);
         color: #ffffff;
     }
 
     div[data-testid="stDataFrame"], div[data-testid="stDataEditor"] {
+        font-size: 14px !important;
         border-radius: 8px;
         overflow: hidden;
         border: 1px solid var(--line2);
+        background: #061b34;
     }
 
     .stDataFrame, .stDataEditor {
-        color: #06172f;
+        color: #f8fafc;
     }
 
     div[data-testid="stFileUploader"] {
-        background: linear-gradient(180deg, #092c5d, #062044);
-        border: 1px solid #1e88ff;
+        background: linear-gradient(180deg, #082b57, #061b34);
+        border: 1px solid var(--line);
         border-radius: 8px;
-        padding: 1rem;
-        margin-bottom: 18px;
+        padding: .85rem;
+        margin-bottom: 0;
     }
 
     div[data-testid="stFileUploader"] label,
@@ -413,9 +510,9 @@ st.markdown(
     }
 
     div[data-testid="stFileUploader"] button {
-        background: linear-gradient(180deg, #1476ff, #0b58cc) !important;
+        background: linear-gradient(180deg, #0f66d8, #094fbe) !important;
         color: #ffffff !important;
-        border: 1px solid #1e88ff !important;
+        border: 1px solid rgba(96, 165, 250, .62) !important;
         border-radius: 8px !important;
         font-weight: 800 !important;
     }
@@ -537,10 +634,41 @@ def show_script_result(result: subprocess.CompletedProcess[str], label: str) -> 
             st.write("No terminal output captured.")
 
 
-def kpi_card(label: str, value: str, note: str, variant: str = "") -> None:
+PLANT_COLORS = {
+    "Agus 1": "#2563eb",
+    "Agus 2": "#06b6d4",
+    "Agus 4": "#10b981",
+    "Agus 5": "#8b5cf6",
+    "Agus 6": "#fbbf24",
+    "Agus 7": "#ef4444",
+}
+
+
+def render_header(last_updated: str | None = None) -> None:
+    timestamp = last_updated or file_timestamp(FORECAST_EXCEL)
+    if timestamp == "Missing":
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
     st.markdown(
         f"""
-        <div class="kpi-card {variant}">
+        <div class="dashboard-header">
+            <div>
+                <h1 class="page-title">NPC Agus Cascade Hydropower Generation Forecasting Dashboard</h1>
+                <p class="page-subtitle">RBFNN-Based Day-Ahead Forecasting and Planned Outage Management</p>
+            </div>
+            <div class="header-update">
+                Last updated
+                <strong>{timestamp}</strong>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def metric_card(label: str, value: str, note: str = "", variant: str = "") -> None:
+    st.markdown(
+        f"""
+        <div class="metric-card kpi-card {variant}">
             <div>
                 <div class="kpi-label">{label}</div>
                 <div class="kpi-value">{value}</div>
@@ -552,13 +680,24 @@ def kpi_card(label: str, value: str, note: str, variant: str = "") -> None:
     )
 
 
-def status_card(label: str, path: Path) -> None:
+def kpi_card(label: str, value: str, note: str, variant: str = "") -> None:
+    metric_card(label, value, note, variant)
+
+
+def status_card(label: str, value_or_path: Path | str, note: str | None = None) -> None:
+    if isinstance(value_or_path, Path):
+        value = file_status(value_or_path)
+        status_note = f"Last modified<br>{file_timestamp(value_or_path)}"
+    else:
+        value = value_or_path
+        status_note = note or ""
+    value_class = "status-value" if value == "Available" else "status-value value-red"
     st.markdown(
         f"""
         <div class="status-card">
             <div class="status-label">{label}</div>
-            <div class="status-value">{file_status(path)}</div>
-            <div class="status-note">Last modified:<br>{file_timestamp(path)}</div>
+            <div class="{value_class}">{value}</div>
+            <div class="status-note">{status_note}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -566,38 +705,51 @@ def status_card(label: str, path: Path) -> None:
 
 
 def instruction_card(text: str) -> None:
-    st.markdown(f'<div class="instruction">{text}</div>', unsafe_allow_html=True)
+    info_box(text)
+
+
+def section_title(title: str) -> None:
+    st.markdown(
+        f'''
+        <div class="section-title-box">
+            <span>{title}</span>
+        </div>
+        ''',
+        unsafe_allow_html=True,
+    )
 
 
 def section_header(title: str) -> None:
-    st.markdown(
-        f"""
-        <div class="section-header">
-            <span>{title}</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    section_title(title)
 
 
 def page_title_block() -> None:
-    st.markdown(
-        """
-        <div class="page-title-block">
-            <div class="page-title">
-                NPC Agus Cascade Hydropower Generation Forecasting Dashboard
-            </div>
-            <div class="page-subtitle">
-                RBFNN-Based Day-Ahead Forecasting and Planned Outage Management
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    render_header()
 
 
 def note_card(text: str) -> None:
     st.markdown(f'<div class="note-card">{text}</div>', unsafe_allow_html=True)
+
+
+def info_box(text: str) -> None:
+    st.markdown(f'<div class="info-box">{text}</div>', unsafe_allow_html=True)
+
+
+def info_strip(text: str) -> None:
+    info_box(text)
+
+
+def action_card(title: str, description: str, button_label: str, key: str | None = None) -> bool:
+    st.markdown(
+        f'''
+        <div class="action-card-full">
+            <div class="action-title">{title}</div>
+            <div class="action-desc">{description}</div>
+        </div>
+        ''',
+        unsafe_allow_html=True,
+    )
+    return st.button(button_label, use_container_width=True, key=key)
 
 
 def latest_date_from_df(df: pd.DataFrame | None) -> str:
@@ -692,9 +844,9 @@ def outage_status_frame(df: pd.DataFrame) -> pd.DataFrame:
 def style_outage_status(df: pd.DataFrame):
     def style_cell(value: object) -> str:
         if value == "ON":
-            return "color: #44d487; font-weight: 800;"
+            return "color: #22c55e; font-weight: 800;"
         if value == "OFF":
-            return "color: #ff5468; font-weight: 900;"
+            return "color: #ef4444; font-weight: 900;"
         return ""
 
     return df.style.map(style_cell)
@@ -743,30 +895,33 @@ def forecast_kpis(forecast: pd.DataFrame | None, outage_df: pd.DataFrame | None 
 
 def style_plotly_chart(fig: go.Figure) -> go.Figure:
     fig.update_layout(
-        title=None,
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="#061a33",
-        font=dict(color="#ffffff"),
-        legend=dict(font=dict(color="#ffffff")),
-        hoverlabel=dict(bgcolor="#061a33", font=dict(color="#ffffff")),
+        title_text="",
+        annotations=[],
+        template="plotly_dark",
+        paper_bgcolor="#0c2947",
+        plot_bgcolor="#0c2947",
+        font=dict(color="#f8fafc", size=14),
+        title_font=dict(size=20, color="#ffffff"),
+        legend=dict(font=dict(color="#f8fafc", size=13), bgcolor="rgba(0,0,0,0)"),
+        hoverlabel=dict(bgcolor="#08213f", font=dict(color="#f8fafc")),
         xaxis=dict(
-            title_font=dict(color="#ffffff"),
-            tickfont=dict(color="#ffffff"),
-            gridcolor="rgba(255,255,255,0.15)",
-            zerolinecolor="rgba(255,255,255,0.25)",
+            title_font=dict(color="#f8fafc", size=14),
+            tickfont=dict(color="#f8fafc", size=12),
+            gridcolor="rgba(148,163,184,0.18)",
+            zerolinecolor="rgba(148,163,184,0.28)",
         ),
         yaxis=dict(
-            title_font=dict(color="#ffffff"),
-            tickfont=dict(color="#ffffff"),
-            gridcolor="rgba(255,255,255,0.15)",
-            zerolinecolor="rgba(255,255,255,0.25)",
+            title_font=dict(color="#f8fafc", size=14),
+            tickfont=dict(color="#f8fafc", size=12),
+            gridcolor="rgba(148,163,184,0.18)",
+            zerolinecolor="rgba(148,163,184,0.28)",
         ),
-        margin=dict(l=40, r=20, t=20, b=40),
+        margin=dict(l=50, r=30, t=20, b=50),
     )
     return fig
 
 
-def render_hourly_line_chart(forecast: pd.DataFrame, height: int = 340) -> None:
+def render_plotly_line_chart(forecast: pd.DataFrame, height: int = 340) -> None:
     missing = [col for col in FORECAST_TOTAL_COLUMNS.values() if col not in forecast.columns]
     if missing:
         st.warning("Forecast total generation columns are incomplete.")
@@ -784,24 +939,25 @@ def render_hourly_line_chart(forecast: pd.DataFrame, height: int = 340) -> None:
         y="Generation (MW)",
         color="Plant",
         markers=True,
-        color_discrete_sequence=["#00a2ff", "#2f80ed", "#4dabf7", "#74c0fc", "#a5d8ff", "#ff4d5e"],
+        color_discrete_map=PLANT_COLORS,
+        title=None,
     )
-    fig.update_traces(line=dict(width=2.6), marker=dict(size=5))
+    fig.update_traces(line=dict(width=2.7), marker=dict(size=6))
     fig.update_layout(
         template="plotly_dark",
         height=height,
-        margin=dict(l=36, r=16, t=20, b=34),
-        font=dict(color="white", size=11),
-        legend=dict(font=dict(size=10, color="white"), bgcolor="rgba(0,0,0,0)"),
+        title_text="",
+        annotations=[],
+        margin=dict(l=50, r=30, t=20, b=50),
         xaxis_title="Forecast Hour",
         yaxis_title="Generation (MW)",
         hovermode="x unified",
     )
     fig = style_plotly_chart(fig)
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, use_container_width=True)
 
 
-def render_daily_bar_chart(forecast: pd.DataFrame, height: int = 340) -> None:
+def render_plotly_bar_chart(forecast: pd.DataFrame, height: int = 340) -> None:
     missing = [col for col in FORECAST_TOTAL_COLUMNS.values() if col not in forecast.columns]
     if missing:
         st.warning("Forecast total generation columns are incomplete.")
@@ -816,29 +972,33 @@ def render_daily_bar_chart(forecast: pd.DataFrame, height: int = 340) -> None:
         y="Daily Total (MWh)",
         text="Daily Total (MWh)",
         color="Plant",
-        color_discrete_sequence=["#1476ff", "#2f80ed", "#1c7ed6", "#339af0", "#74c0fc", "#4dabf7"],
+        color_discrete_map=PLANT_COLORS,
+        title=None,
     )
     fig.update_traces(texttemplate="%{text:,.2f}", textposition="outside", marker_line_width=0)
     fig.update_layout(
         template="plotly_dark",
         height=height,
-        margin=dict(l=40, r=16, t=20, b=34),
-        font=dict(color="white", size=11),
+        title_text="",
+        annotations=[],
+        margin=dict(l=50, r=30, t=20, b=50),
         showlegend=False,
         xaxis_title="",
         yaxis_title="Generation (MWh)",
     )
     fig = style_plotly_chart(fig)
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def render_hourly_line_chart(forecast: pd.DataFrame, height: int = 340) -> None:
+    render_plotly_line_chart(forecast, height)
+
+
+def render_daily_bar_chart(forecast: pd.DataFrame, height: int = 340) -> None:
+    render_plotly_bar_chart(forecast, height)
 
 
 def dashboard_overview() -> None:
-    page_title_block()
-    refresh_cols = st.columns([5, 1.25])
-    with refresh_cols[1]:
-        if st.button("Refresh Data From Disk", width="stretch"):
-            clear_cached_data("Data refreshed from disk.")
-
     forecast = None
     cleaned = None
     outage = None
@@ -859,67 +1019,90 @@ def dashboard_overview() -> None:
     cleaned_dt = cleaned_datetime(cleaned)
     outage_info = outage_summary(outage)
 
-    cols = st.columns(5)
+    render_header(kpis["forecast_generated"])
+    cols = st.columns(5, gap="medium")
     with cols[0]:
-        kpi_card("Total Cascade Forecast", kpis["cascade_total"], "24-hour cascade sum")
+        metric_card("Total Cascade Forecast", kpis["cascade_total"], "24-hour cascade sum")
     with cols[1]:
-        kpi_card("Peak Cascade Output", kpis["peak"], "Maximum hourly output")
+        metric_card("Peak Cascade Output", kpis["peak"], "Maximum hourly output")
     with cols[2]:
-        kpi_card("Unavailable Unit-Hours", f"{outage_info['unavailable']:,}", "Planned OFF entries", "red" if outage_info["unavailable"] else "")
+        metric_card("Unavailable Unit-Hours", f"{outage_info['unavailable']:,}", "Planned OFF entries", "red" if outage_info["unavailable"] else "")
     with cols[3]:
-        kpi_card("Latest Cleaned Timestamp", cleaned_dt.max().strftime("%Y-%m-%d %H:%M") if cleaned_dt.notna().any() else "N/A", "From cleaned data")
+        metric_card("Latest Cleaned Timestamp", cleaned_dt.max().strftime("%Y-%m-%d %H:%M") if cleaned_dt.notna().any() else "N/A", "From cleaned data")
     with cols[4]:
-        kpi_card("Latest Forecast Timestamp", file_timestamp(FORECAST_EXCEL), "Forecast file modified")
+        metric_card("Latest Forecast Timestamp", file_timestamp(FORECAST_EXCEL), "Forecast file modified")
 
     if forecast is not None:
-        chart_cols = st.columns(2)
+        chart_cols = st.columns(2, gap="large")
         with chart_cols[0]:
-            section_header("Total Generation per Agus Plant Hourly")
-            render_hourly_line_chart(forecast)
+            section_title("Total Generation per Agus Plant Hourly")
+            with st.container():
+                render_plotly_line_chart(forecast)
         with chart_cols[1]:
-            section_header("Total Generation per Agus Plant Daily Total")
-            render_daily_bar_chart(forecast)
+            section_title("Total Generation per Agus Plant Daily Total")
+            with st.container():
+                render_plotly_bar_chart(forecast)
 
-    section_header("Recent Activity and Status")
-    status_cols = st.columns(4)
-    status_items = [
-        ("Raw Excel Data", RAW_EXCEL_PATH),
-        ("Cleaned Data", cleaned_source_path()),
-        ("Outage Plan", OUTAGE_PLAN_PATH),
-        ("RBFNN Forecast", FORECAST_EXCEL),
-    ]
-    for col, (label, path) in zip(status_cols, status_items):
-        with col:
-            status_card(label, path)
+    section_title("Recent Activity and Status")
+    with st.container():
+        status_cols = st.columns(4, gap="medium")
+        status_items = [
+            ("Raw Excel Data", RAW_EXCEL_PATH),
+            ("Cleaned Data", cleaned_source_path()),
+            ("Outage Plan", OUTAGE_PLAN_PATH),
+            ("RBFNN Forecast", FORECAST_EXCEL),
+        ]
+        for col, (label, path) in zip(status_cols, status_items):
+            with col:
+                status_card(label, path)
 
 
 def data_management_page() -> None:
-    page_title_block()
-    section_header("Data Management")
-    note_card("Update raw Excel data, refresh files, and clean hourly dataset.")
+    render_header(file_timestamp(cleaned_source_path()))
+    section_title("Data Management")
+    with st.container():
+        info_strip("Update raw Excel data, refresh files, and clean hourly dataset.")
 
-    section_header("Data Actions")
-    action_cols = st.columns([1.35, 1, 1])
-    with action_cols[0]:
-        uploaded = st.file_uploader("Upload Excel File Optional", type=["xlsx", "xls"], label_visibility="visible")
-        if uploaded is not None:
-            DATA_DIR.mkdir(parents=True, exist_ok=True)
-            RAW_EXCEL_PATH.write_bytes(uploaded.getbuffer())
-            clear_cached_data("Uploaded Excel file saved.")
-    with action_cols[1]:
-        st.write("")
-        st.write("")
-        if st.button("Refresh Data From Disk", width="stretch"):
-            clear_cached_data("Data refreshed from disk.")
-    with action_cols[2]:
-        st.write("")
-        st.write("")
-        if st.button("Run Data Cleaning", width="stretch"):
-            with st.spinner("Running data cleaning workflow..."):
-                try:
-                    show_script_result(run_script(CLEAN_SCRIPT), "Data cleaning")
-                except Exception as exc:
-                    st.error(str(exc))
+    section_title("Data Actions")
+    with st.container():
+        action_cols = st.columns(3, gap="large")
+        with action_cols[0]:
+            st.markdown(
+                """
+                <div class="action-card-full">
+                    <div class="action-title">Upload Excel File</div>
+                    <div class="action-desc">Upload a new Excel workbook to replace the current raw data source.</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            uploaded = st.file_uploader("Upload Excel File", type=["xlsx", "xls"], label_visibility="collapsed")
+            if uploaded is not None:
+                DATA_DIR.mkdir(parents=True, exist_ok=True)
+                RAW_EXCEL_PATH.write_bytes(uploaded.getbuffer())
+                clear_cached_data("Uploaded Excel file saved.")
+        with action_cols[1]:
+            refresh_clicked = action_card(
+                "Refresh Data From Disk",
+                "Reload the latest raw Excel files from disk without restarting the application.",
+                "Refresh Data From Disk",
+                key="refresh_data_from_disk",
+            )
+            if refresh_clicked:
+                clear_cached_data("Data refreshed from disk.")
+        with action_cols[2]:
+            clean_clicked = action_card(
+                "Run Data Cleaning",
+                "Run the data cleaning process to update the cleaned hourly dataset.",
+                "Run Data Cleaning",
+                key="run_data_cleaning",
+            )
+            if clean_clicked:
+                with st.spinner("Running data cleaning workflow..."):
+                    try:
+                        show_script_result(run_script(CLEAN_SCRIPT), "Data cleaning")
+                    except Exception as exc:
+                        st.error(str(exc))
 
     raw_df = None
     cleaned_df = None
@@ -933,34 +1116,36 @@ def data_management_page() -> None:
         pass
 
     cleaned_dt = cleaned_datetime(cleaned_df)
-    section_header("Data Confirmation")
-    confirm_cols_1 = st.columns(4)
-    with confirm_cols_1[0]:
-        kpi_card("Raw Excel Status", file_status(RAW_EXCEL_PATH), "Source workbook")
-    with confirm_cols_1[1]:
-        kpi_card("Raw Excel Last Modified", file_timestamp(RAW_EXCEL_PATH), "File timestamp")
-    with confirm_cols_1[2]:
-        kpi_card("Latest Raw Data Date", latest_date_from_df(raw_df), "Detected from Date/Time")
-    with confirm_cols_1[3]:
-        kpi_card("Cleaned Data Status", file_status(cleaned_source_path()), "Cleaned output")
+    section_title("Data Confirmation")
+    with st.container():
+        confirm_cols_1 = st.columns(4, gap="medium")
+        with confirm_cols_1[0]:
+            metric_card("Raw Excel Status", file_status(RAW_EXCEL_PATH), "Source workbook", "green" if file_status(RAW_EXCEL_PATH) == "Available" else "")
+        with confirm_cols_1[1]:
+            metric_card("Raw Excel Last Modified", file_timestamp(RAW_EXCEL_PATH), "File timestamp")
+        with confirm_cols_1[2]:
+            metric_card("Latest Raw Data Date", latest_date_from_df(raw_df), "Detected from Date/Time")
+        with confirm_cols_1[3]:
+            metric_card("Cleaned Data Status", file_status(cleaned_source_path()), "Cleaned output", "green" if file_status(cleaned_source_path()) == "Available" else "")
 
-    confirm_cols_2 = st.columns(4)
-    with confirm_cols_2[0]:
-        kpi_card("Cleaned Data Last Modified", file_timestamp(cleaned_source_path()), "File timestamp")
-    with confirm_cols_2[1]:
-        kpi_card("Latest Cleaned Data Date", cleaned_dt.max().strftime("%Y-%m-%d %H:%M") if cleaned_dt.notna().any() else "N/A", "Detected from date/time")
-    with confirm_cols_2[2]:
-        kpi_card("Total Cleaned Rows", f"{len(cleaned_df):,}" if cleaned_df is not None else "N/A", "Hourly records")
-    with confirm_cols_2[3]:
-        kpi_card("Total Cleaned Columns", f"{len(cleaned_df.columns):,}" if cleaned_df is not None else "N/A", "Prepared features")
+        confirm_cols_2 = st.columns(4, gap="medium")
+        with confirm_cols_2[0]:
+            metric_card("Cleaned Data Last Modified", file_timestamp(cleaned_source_path()), "File timestamp")
+        with confirm_cols_2[1]:
+            metric_card("Latest Cleaned Data Date", cleaned_dt.max().strftime("%Y-%m-%d %H:%M") if cleaned_dt.notna().any() else "N/A", "Detected from date/time")
+        with confirm_cols_2[2]:
+            metric_card("Total Cleaned Rows", f"{len(cleaned_df):,}" if cleaned_df is not None else "N/A", "Hourly records")
+        with confirm_cols_2[3]:
+            metric_card("Total Cleaned Columns", f"{len(cleaned_df.columns):,}" if cleaned_df is not None else "N/A", "Prepared features")
 
-    section_header("Data Notes")
-    note_card("Uploading replaces the raw Excel workbook used by the cleaning script. Refreshing reloads the latest files from disk without restarting Streamlit. Running data cleaning updates the cleaned hourly dataset used by the forecasting workflow.")
+    section_title("Data Notes")
+    with st.container():
+        note_card("Uploading replaces the raw Excel workbook used by the cleaning script. Refreshing reloads the latest files from disk without restarting the application. Running data cleaning updates the cleaned hourly dataset used by the forecasting workflow.")
 
 
 def planned_outage_page() -> None:
-    page_title_block()
-    section_header("Planned Outage Planning")
+    render_header(file_timestamp(OUTAGE_PLAN_PATH))
+    section_title("Planned Outage Planning")
     instruction_card("Edit planned unit availability below. Use 1 for ON/available/running unit and 0 for OFF/unavailable/outage unit.")
 
     if st.session_state.get("outage_saved"):
@@ -979,16 +1164,16 @@ def planned_outage_page() -> None:
         editable[col] = pd.to_numeric(editable[col], errors="coerce").fillna(1).clip(0, 1).round().astype(int)
 
     summary = outage_summary(editable)
-    kpi_cols = st.columns(4)
+    kpi_cols = st.columns(4, gap="medium")
     with kpi_cols[0]:
-        kpi_card("Unavailable Unit-Hours", f"{summary['unavailable']:,}", "Cells marked 0", "red" if summary["unavailable"] else "")
+        metric_card("Unavailable Unit-Hours", f"{summary['unavailable']:,}", "Cells marked 0", "red" if summary["unavailable"] else "")
     with kpi_cols[1]:
-        kpi_card("Available Unit-Hours", f"{summary['available']:,}", "Cells marked 1")
+        metric_card("Available Unit-Hours", f"{summary['available']:,}", "Cells marked 1", "green")
     with kpi_cols[2]:
         affected = ", ".join(summary["affected_plants"]) if summary["affected_plants"] else "None"
-        kpi_card("Affected Plants", str(len(summary["affected_plants"])), affected, "light")
+        metric_card("Affected Plants", str(len(summary["affected_plants"])), affected, "light")
     with kpi_cols[3]:
-        kpi_card("Outage Plan Last Modified", file_timestamp(OUTAGE_PLAN_PATH), "Saved outage workbook", "light")
+        metric_card("Outage Plan Last Modified", file_timestamp(OUTAGE_PLAN_PATH), "Saved outage workbook", "light")
 
     column_config = {
         col: st.column_config.NumberColumn(col, min_value=0, max_value=1, step=1, format="%d")
@@ -996,16 +1181,16 @@ def planned_outage_page() -> None:
     }
     edited = st.data_editor(
         editable,
-        width="stretch",
-        height=350,
+        use_container_width=True,
+        height=330,
         hide_index=True,
         column_config=column_config,
         disabled=[col for col in editable.columns if col not in outage_cols],
     )
 
-    button_cols = st.columns(3)
+    button_cols = st.columns(3, gap="large")
     with button_cols[0]:
-        if st.button("Save Outage Plan", width="stretch"):
+        if st.button("Save Outage Plan", use_container_width=True):
             try:
                 save_outage_plan(edited)
                 st.session_state["outage_saved"] = True
@@ -1013,7 +1198,7 @@ def planned_outage_page() -> None:
             except Exception as exc:
                 st.error(str(exc))
     with button_cols[1]:
-        if st.button("Forecast Day-Ahead", width="stretch"):
+        if st.button("Forecast Day-Ahead", use_container_width=True):
             with st.spinner("Generating fast forecast-only output..."):
                 try:
                     save_outage_plan(edited)
@@ -1025,28 +1210,23 @@ def planned_outage_page() -> None:
                 except Exception as exc:
                     st.error(str(exc))
     with button_cols[2]:
-        if st.button("Retrain RBFNN Model", width="stretch"):
+        if st.button("Retrain RBFNN Model", use_container_width=True):
             with st.spinner("Retraining RBFNN model..."):
                 try:
                     show_script_result(run_script(RBFNN_SCRIPT, ["--train"]), "RBFNN retraining")
                 except Exception as exc:
                     st.error(str(exc))
 
-    section_header("ON/OFF Status View")
-    status_view = outage_status_frame(edited)
-    if not status_view.empty:
-        st.dataframe(style_outage_status(status_view), width="stretch", height=255)
-    if summary["affected_units"]:
-        note_card(f'Affected Units: {", ".join(summary["affected_units"])}')
+    section_title("ON/OFF Status View")
+    with st.container():
+        status_view = outage_status_frame(edited)
+        if not status_view.empty:
+            st.dataframe(style_outage_status(status_view), use_container_width=True, height=320)
+        if summary["affected_units"]:
+            note_card(f'Affected Units: {", ".join(summary["affected_units"])}')
 
 
 def rbfnn_forecasting_page() -> None:
-    page_title_block()
-    refresh_cols = st.columns([5, 1.25])
-    with refresh_cols[1]:
-        if st.button("Refresh Forecast", width="stretch"):
-            clear_cached_data("Forecast refreshed from disk.")
-
     try:
         forecast = load_forecast(modified_ns(FORECAST_EXCEL))
     except Exception as exc:
@@ -1059,19 +1239,26 @@ def rbfnn_forecasting_page() -> None:
         outage_df = None
 
     kpis = forecast_kpis(forecast, outage_df)
-    kpi_cols = st.columns(4)
-    with kpi_cols[0]:
-        kpi_card("Total Cascade Forecast", kpis["cascade_total"], "24-hour cascade sum")
-    with kpi_cols[1]:
-        kpi_card("Peak Cascade Output", kpis["peak"], "Maximum hourly output")
-    with kpi_cols[2]:
-        kpi_card("Affected Plants", kpis["affected"], "Saved outage plan")
-    with kpi_cols[3]:
-        kpi_card("Forecast Generated", kpis["forecast_generated"], "Forecast file modified")
+    render_header(kpis["forecast_generated"])
+    refresh_cols = st.columns([5, 1.25], gap="medium")
+    with refresh_cols[1]:
+        if st.button("Refresh Forecast", use_container_width=True):
+            clear_cached_data("Forecast refreshed from disk.")
 
-    section_header("Forecast Table")
-    st.dataframe(display_forecast_table(forecast), width="stretch", height=285)
-    dl_cols = st.columns(2)
+    kpi_cols = st.columns(4, gap="medium")
+    with kpi_cols[0]:
+        metric_card("Total Cascade Forecast", kpis["cascade_total"], "24-hour cascade sum")
+    with kpi_cols[1]:
+        metric_card("Peak Cascade Output", kpis["peak"], "Maximum hourly output")
+    with kpi_cols[2]:
+        metric_card("Affected Plants", kpis["affected"], "Saved outage plan", "red" if kpis["affected"] != "None" else "")
+    with kpi_cols[3]:
+        metric_card("Forecast Generated", kpis["forecast_generated"], "Forecast file modified")
+
+    section_title("Forecast Table")
+    with st.container():
+        st.dataframe(display_forecast_table(forecast), use_container_width=True, height=320)
+    dl_cols = st.columns(2, gap="large")
     with dl_cols[0]:
         excel_bytes = read_file_bytes(FORECAST_EXCEL)
         if excel_bytes:
@@ -1080,7 +1267,7 @@ def rbfnn_forecasting_page() -> None:
                 data=excel_bytes,
                 file_name="Day_Ahead_24H_RBFNN_Forecast.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                width="stretch",
+                use_container_width=True,
             )
     with dl_cols[1]:
         csv_bytes = read_file_bytes(FORECAST_CSV) or forecast.to_csv(index=False).encode("utf-8")
@@ -1089,22 +1276,24 @@ def rbfnn_forecasting_page() -> None:
             data=csv_bytes,
             file_name="Day_Ahead_24H_RBFNN_Forecast.csv",
             mime="text/csv",
-            width="stretch",
+            use_container_width=True,
         )
 
-    chart_cols = st.columns(2)
+    chart_cols = st.columns(2, gap="large")
     with chart_cols[0]:
-        section_header("Total Generation per Agus Plant Hourly")
-        render_hourly_line_chart(forecast)
+        section_title("Total Generation per Agus Plant Hourly")
+        with st.container():
+            render_plotly_line_chart(forecast)
     with chart_cols[1]:
-        section_header("Total Generation per Agus Plant Daily Total")
-        render_daily_bar_chart(forecast)
+        section_title("Total Generation per Agus Plant Daily Total")
+        with st.container():
+            render_plotly_bar_chart(forecast)
 
 
 def system_information_page() -> None:
-    page_title_block()
+    render_header()
 
-    section_header("Forecasting Workflow")
+    section_title("Forecasting Workflow")
     workflow = [
         ("1", "Update Raw Data", "Upload or refresh Excel data"),
         ("2", "Clean Data", "Prepare hourly dataset"),
@@ -1112,33 +1301,35 @@ def system_information_page() -> None:
         ("4", "Forecast / Retrain", "Generate or retrain RBFNN"),
         ("5", "View Forecast", "Review results and download"),
     ]
-    cols = st.columns(5)
-    for col, (num, title, note) in zip(cols, workflow):
-        with col:
-            st.markdown(
-                f"""
-                <div class="workflow-card">
-                    <div class="workflow-icon">{num}</div>
-                    <div class="workflow-title">{title}</div>
-                    <div class="workflow-note">{note}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+    with st.container():
+        cols = st.columns(5, gap="medium")
+        for col, (num, title, note) in zip(cols, workflow):
+            with col:
+                st.markdown(
+                    f"""
+                    <div class="workflow-card">
+                        <div class="workflow-step">{num}</div>
+                        <div class="workflow-title">{title}</div>
+                        <div class="workflow-note">{note}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
-    section_header("File Status Overview")
-    status_cols = st.columns(4)
-    status_items = [
-        ("Raw Excel Data", RAW_EXCEL_PATH),
-        ("Cleaned Data", cleaned_source_path()),
-        ("Outage Plan", OUTAGE_PLAN_PATH),
-        ("RBFNN Forecast", FORECAST_EXCEL),
-    ]
-    for col, (label, path) in zip(status_cols, status_items):
-        with col:
-            status_card(label, path)
+    section_title("File Status Overview")
+    with st.container():
+        status_cols = st.columns(4, gap="medium")
+        status_items = [
+            ("Raw Excel Data", RAW_EXCEL_PATH),
+            ("Cleaned Data", cleaned_source_path()),
+            ("Outage Plan", OUTAGE_PLAN_PATH),
+            ("RBFNN Forecast", FORECAST_EXCEL),
+        ]
+        for col, (label, path) in zip(status_cols, status_items):
+            with col:
+                status_card(label, path)
 
-    section_header("System Details")
+    section_title("System Details")
     details = pd.DataFrame(
         [
             {"Detail": "Python Version", "Value": platform.python_version()},
@@ -1149,12 +1340,13 @@ def system_information_page() -> None:
             {"Detail": "Last System Check", "Value": datetime.now().strftime("%Y-%m-%d %H:%M")},
         ]
     )
-    st.dataframe(details, width="stretch", hide_index=True)
+    with st.container():
+        st.dataframe(details, use_container_width=True, hide_index=True, height=250)
 
 
-with st.sidebar:
+def render_sidebar() -> str:
     st.markdown('<div class="sidebar-title">NPC Agus Operations</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sidebar-subtitle">RBFNN forecasting control panel</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sidebar-subtitle">RBFNN Forecasting Control Panel</div>', unsafe_allow_html=True)
     selected_page = st.radio("Navigation", NAV_ITEMS, label_visibility="collapsed")
     st.markdown(
         f"""
@@ -1165,6 +1357,11 @@ with st.sidebar:
         """,
         unsafe_allow_html=True,
     )
+    return selected_page
+
+
+with st.sidebar:
+    selected_page = render_sidebar()
 
 if selected_page == "Dashboard Overview":
     dashboard_overview()
