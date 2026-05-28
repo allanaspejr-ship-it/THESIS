@@ -16,6 +16,10 @@ from openpyxl import load_workbook
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
+# ============================================================
+# PATH AND REPORT CONFIGURATION
+# ============================================================
+
 # Defines metadata and figure locations used for thesis-ready outputs.
 BASE_DIR = Path(__file__).resolve().parents[1]
 METADATA_DIR = BASE_DIR / "metadata"
@@ -60,6 +64,10 @@ FIGURE_DIRS = {
 
 SAVED_OUTPUTS = []
 
+
+# ============================================================
+# OUTPUT AND LOADING HELPERS
+# ============================================================
 
 # Creates all figure and organized metadata output folders.
 def ensure_dirs():
@@ -195,6 +203,10 @@ def normalized_metric_frames(metrics_df, model_name):
     return validation, testing
 
 
+# ============================================================
+# THESIS FIGURE GENERATION
+# ============================================================
+
 # Generates cleaned hydropower generation profile figures per plant.
 def generate_cleaned_profile_figures():
     df = read_cleaned_data()
@@ -326,6 +338,10 @@ def generate_day_ahead_forecast_figure():
     save_figure(FIGURE_DIRS["day_ahead_forecast"] / "total_cascade_day_ahead_forecast_with_benchmarks.png")
 
 
+# ============================================================
+# ORGANIZED METADATA EXPORT
+# ============================================================
+
 # Combines plant-level RBFNN daily metrics into one organized workbook.
 def write_rbfnn_daily_metrics(split):
     frames = []
@@ -396,6 +412,7 @@ def write_overall_comparison():
 
 # Runs all thesis figure and organized metadata generation steps.
 def main():
+    # --- Figure and metadata generation pipeline ---
     ensure_dirs()
     generate_cleaned_profile_figures()
     generate_testing_actual_vs_forecast_figures()

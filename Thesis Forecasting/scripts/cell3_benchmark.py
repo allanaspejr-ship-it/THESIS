@@ -20,6 +20,10 @@ from xgboost import XGBRegressor
 
 warnings.filterwarnings("ignore", category=pd.errors.PerformanceWarning)
 
+# ============================================================
+# PATH AND BENCHMARK CONFIGURATION
+# ============================================================
+
 # Defines project paths for cleaned data, benchmark models, metrics, and forecast outputs.
 PROJECT_DIR = Path(__file__).resolve().parents[2]
 THESIS_DIR = Path(__file__).resolve().parents[1]
@@ -91,6 +95,10 @@ LAGS = [1, 2, 3, 6, 12, 24, 48, 72, 168]
 ROLL_WINDOWS = [3, 6, 12, 24, 48, 168]
 MODEL_KEYS = {"Random Forest": "random_forest", "XGBoost": "xgboost"}
 
+
+# ============================================================
+# METRICS, FILE HELPERS, AND MODEL FACTORIES
+# ============================================================
 
 # Sets the minimum actual-generation level for meaningful MAPE calculation.
 def operational_threshold(plant):
@@ -224,6 +232,10 @@ def make_benchmark_model(name):
     raise ValueError(f"Unsupported benchmark model: {name}")
 
 
+# ============================================================
+# BENCHMARK TRAINING AND PREDICTION HELPERS
+# ============================================================
+
 # Trains one plant-specific benchmark model and saves it for reuse.
 def train_benchmark_model(name, plant, train, x_cols, y_col):
     model = make_benchmark_model(name)
@@ -245,6 +257,10 @@ def predict_aligned(model_info, X, plant):
     X_input = align_features(X.copy(), model_feature_columns)
     return np.clip(model.predict(X_input), 0.0, CAPACITY_MW[plant] * 1.05)
 
+
+# ============================================================
+# FEATURE ENGINEERING AND CHRONOLOGICAL SPLITTING
+# ============================================================
 
 # Builds time, lag, rolling, unit-share, and outage features for benchmark models.
 def add_features(df):
@@ -301,6 +317,10 @@ def split(data):
     i2 = int(n * 0.85)
     return data.iloc[:i1], data.iloc[i1:i2], data.iloc[i2:]
 
+
+# ============================================================
+# OUTAGE-AWARE UNIT ALLOCATION
+# ============================================================
 
 # Extracts the unit number from an outage/status column.
 def unit_from_outage_col(col):
@@ -474,6 +494,10 @@ def validate_and_fix_unit_forecast(forecast, planned):
     return forecast
 
 
+# ============================================================
+# FORECAST INPUT AND OUTPUT FORMATTING
+# ============================================================
+
 # Creates an empty 24-hour forecast table with all plant/unit outputs.
 def empty_forecast_frame(planned):
     forecast = pd.DataFrame({"Date": planned["Date"].dt.date, "Hour": planned["Hour"].astype(int)})
@@ -538,6 +562,10 @@ def load_planned():
         planned[col] = np.where(pd.to_numeric(planned[col], errors="coerce").fillna(1) > 0, 1, 0)
     return planned
 
+
+# ============================================================
+# RECURSIVE 24-HOUR BENCHMARK FORECASTING
+# ============================================================
 
 # Builds one forecast feature row from the latest historical data.
 def feature_row_from_history(hist, plant, date_val, hour_val, model_features=None):
@@ -619,6 +647,10 @@ def save_forecast_outputs(forecast, model_key, safe_name):
     print("Saved:", xlsx_path)
     print("Saved:", csv_path)
 
+
+# ============================================================
+# WORKFLOW ENTRY POINTS
+# ============================================================
 
 # Loads cleaned data and planned outages required by benchmark workflows.
 def load_latest_inputs():
@@ -753,6 +785,7 @@ def run_forecast_only():
 # Trains benchmark models, saves metrics/artifacts, and generates forecasts.
 def run_training_and_forecast():
     raw_df, planned = load_latest_inputs()
+    # --- Feature preparation shared by Random Forest and XGBoost ---
     df = add_features(raw_df)
     rows = []
     testing_prediction_rows = {"Random Forest": [], "XGBoost": []}
@@ -766,6 +799,7 @@ def run_training_and_forecast():
         train, val, test = split(work)
 
         for name in ["Random Forest", "XGBoost"]:
+            # --- Model training and validation/testing evaluation ---
             model_info = train_benchmark_model(name, plant, train, x_cols, y_col)
             _, model_feature_columns = unpack_model_payload(model_info)
             val_pred = predict_aligned(model_info, val[x_cols].copy(), plant)

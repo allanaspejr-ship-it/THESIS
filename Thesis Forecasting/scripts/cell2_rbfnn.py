@@ -36,6 +36,10 @@ np.random.seed(42)
 tf.get_logger().setLevel("ERROR")
 tf.random.set_seed(42)
 
+# ============================================================
+# PATH AND MODEL CONFIGURATION
+# ============================================================
+
 # Defines project paths for cleaned data, saved RBFNN models, metrics, and forecast outputs.
 PROJECT_DIR = Path(__file__).resolve().parents[2]
 THESIS_DIR = Path(__file__).resolve().parents[1]
@@ -140,6 +144,10 @@ FORECAST_PROFILE_BLEND_FALLBACK = {
 }
 
 
+# ============================================================
+# OUTPUT AND FILE HELPERS
+# ============================================================
+
 # Saves Keras models safely and falls back to H5 if the target file is locked.
 def atomic_save_keras_model(model, path):
     temp_path = path.with_name(f"{path.stem}.tmp{path.suffix}")
@@ -211,6 +219,10 @@ def rebuild_datetime(df):
     return out.sort_values("datetime").reset_index(drop=True)
 
 
+# ============================================================
+# INPUT COMPATIBILITY HELPERS
+# ============================================================
+
 # Adds legacy-compatible aliases expected by older saved models.
 def add_runtime_compatibility_columns(df):
     # Thesis Forecasting cleaned files use public names; legacy saved models may expect old feature names.
@@ -224,6 +236,10 @@ def add_runtime_compatibility_columns(df):
         out["lake_lanao_hourly_outflow_elev_agus7"] = out["lake_lanao_outflow"]
     return out
 
+
+# ============================================================
+# RBFNN ARCHITECTURE AND TRAINING HELPERS
+# ============================================================
 
 # Implements the Gaussian radial basis hidden layer used by the RBFNN.
 class RBFLayer(tf.keras.layers.Layer):
@@ -273,6 +289,10 @@ def init_centers(model, x_train, n_centers=N_CENTERS):
             return
 
 
+# ============================================================
+# METRICS AND DATA SPLITTING
+# ============================================================
+
 # Sets the minimum actual-generation level for meaningful MAPE calculation.
 def operational_threshold(plant):
     return max(1.0, 0.01 * CAPACITY_MW[plant])
@@ -309,6 +329,10 @@ def chronological_split(data):
     i2 = int(n * (TRAIN_RATIO + VAL_RATIO))
     return data.iloc[:i1].copy(), data.iloc[i1:i2].copy(), data.iloc[i2:].copy()
 
+
+# ============================================================
+# FEATURE ENGINEERING
+# ============================================================
 
 # Builds time, lag, rolling, unit-share, outage, and upstream cascade features.
 def add_features(df):
@@ -408,6 +432,10 @@ def feature_columns_for(data, plant):
     cols += [c for c in data.columns if "_lag" in c and (c.startswith("tot_agus") or c.startswith("elev_agus") or "outflow" in c or c.startswith("rainfall"))]
     return list(dict.fromkeys([c for c in cols if c in data.columns]))
 
+
+# ============================================================
+# VALIDATION CALIBRATION AND FORECAST SHAPE ADJUSTMENTS
+# ============================================================
 
 # Saves daily error summaries for validation or testing splits.
 def save_daily_metrics(part_df, y_true, y_pred, plant, path):
@@ -588,6 +616,10 @@ def shape_metrics(y_true, y_pred):
         "shape_delta_mae": shape_mae,
     }
 
+
+# ============================================================
+# OUTAGE-AWARE UNIT ALLOCATION
+# ============================================================
 
 # Extracts the unit number from an outage/status column.
 def unit_from_outage_col(col):
@@ -842,6 +874,10 @@ def validate_hourly_outage_effect(forecast_df, outage_df):
         print("Hourly outage validation passed.")
 
 
+# ============================================================
+# FORECAST INPUT AND OUTPUT FORMATTING
+# ============================================================
+
 # Creates an empty 24-hour forecast table with all plant/unit outputs.
 def empty_forecast_frame(planned):
     forecast = pd.DataFrame({"Date": planned["Date"].dt.date, "Hour": planned["Hour"].astype(int)})
@@ -918,6 +954,10 @@ def predict_delta(model, x_scaler, y_scaler, x_frame):
     y_scaled = model(x_scaled, training=False).numpy()
     return y_scaler.inverse_transform(y_scaled).flatten()
 
+
+# ============================================================
+# RECURSIVE 24-HOUR RBFNN FORECASTING
+# ============================================================
 
 # Builds one forecast feature row from the latest historical data.
 def feature_row_from_history(hist, plant, x_cols, date_val, hour_val):
@@ -1103,6 +1143,10 @@ def save_actual_forecast_diagnostics(forecast):
     print("Saved actual-vs-forecast diagnostics:", out_path)
 
 
+# ============================================================
+# WORKFLOW ENTRY POINTS
+# ============================================================
+
 # Loads cleaned data and planned outages required by RBFNN workflows.
 def load_latest_inputs():
     cleaned_excel = CLEANED_DATA_DIR / "cleaned_hourly_data.xlsx"
@@ -1262,6 +1306,7 @@ def run_training_and_forecast():
         data = feat_df.dropna(subset=[y_col] + x_cols).copy()
         train_df, val_df, test_df = chronological_split(data)
 
+        # --- Scaling and chronological split preparation ---
         x_scaler = StandardScaler()
         y_scaler = StandardScaler()
         x_train = x_scaler.fit_transform(train_df[x_cols].values.astype(np.float32))
@@ -1275,6 +1320,7 @@ def run_training_and_forecast():
         val_actual = val_df[f"{target}_tplus1"].values.astype(float)
         test_actual = test_df[f"{target}_tplus1"].values.astype(float)
 
+        # --- Model configuration search ---
         best = None
         for n_centers in SEARCH_CENTER_COUNTS:
             for learning_rate in SEARCH_LEARNING_RATES:
@@ -1311,6 +1357,7 @@ def run_training_and_forecast():
                             "test_pred": test_pred_candidate,
                         }
 
+        # --- Validation calibration and testing evaluation ---
         model = best["model"]
         history = best["history"]
         shrinkage = best["shrinkage"]
@@ -1359,6 +1406,7 @@ def run_training_and_forecast():
                 "model": "RBFNN",
             })
 
+        # --- Artifact export for forecast-only reuse ---
         atomic_save_keras_model(model, MODEL_DIR / f"rbfnn_{plant}.keras")
         joblib.dump(x_scaler, MODEL_DIR / f"x_scaler_{plant}.pkl")
         joblib.dump(y_scaler, MODEL_DIR / f"y_scaler_{plant}.pkl")

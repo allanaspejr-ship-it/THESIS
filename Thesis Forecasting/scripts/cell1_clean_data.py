@@ -316,10 +316,11 @@ def resolve_input_file():
 
 
 # ============================================================
-# MAIN
+# MAIN CLEANING WORKFLOW
 # ============================================================
 
 def main():
+    # --- Data loading and header preprocessing ---
     # Loads the raw workbook and converts its multi-row header into standard columns.
     input_file = resolve_input_file()
 
@@ -339,6 +340,7 @@ def main():
 
     df = build_datetime(df)
 
+    # --- Column grouping for plant-specific preprocessing ---
     # Groups source columns by purpose so each data type can be cleaned correctly.
     gen_unit_cols = [c for c in df.columns if c.startswith("gen_agus") and "unit" in c]
     out_unit_cols = [c for c in df.columns if c.startswith("out_agus") and "unit" in c]
@@ -356,6 +358,7 @@ def main():
     print("Rain cols:", rain_cols)
     print("Outflow cols:", outflow_cols)
 
+    # --- Generation preprocessing ---
     # Cleans unit generation values, including short gaps, short zeros, and spikes.
     for c in gen_unit_cols:
         s = df[c].astype(float).copy()
@@ -370,6 +373,7 @@ def main():
         s = s.mask(s <= CONFIG["approx_zero_threshold"], 0.0)
         df[c] = s
 
+    # --- Hydraulic and weather preprocessing ---
     # Cleans gate-related values and prevents physically invalid negative openings.
     for c in spill_cols + tot_gate_cols:
         s = df[c].astype(float).copy()
@@ -394,6 +398,7 @@ def main():
 
     num_cols = [c for c in df.columns if c not in ["date", "time", "datetime"]]
 
+    # --- Missing-value imputation ---
     # Fills remaining numeric gaps using neighboring feature patterns.
     if df[num_cols].isna().sum().sum() > 0:
         imputer = KNNImputer(
@@ -402,6 +407,7 @@ def main():
         )
         df[num_cols] = imputer.fit_transform(df[num_cols])
 
+    # --- Derived generation and outage status fields ---
     # Recomputes total plant generation from cleaned unit generation values.
     for p in CONFIG["plants"]:
         unit_cols = [c for c in gen_unit_cols if plant_from_col(c) == p]
@@ -432,6 +438,7 @@ def main():
             0
         )
 
+    # --- Hourly resampling ---
     # Resamples cleaned data to hourly frequency for forecasting scripts.
     dfh = df.set_index("datetime").sort_index()
     num_cols_h = dfh.select_dtypes(include=[np.number]).columns.tolist()
@@ -474,6 +481,7 @@ def main():
     cleaned_parquet = DIRS["runtime"] / "cleaned_hourly_data.parquet"
     meta_json = DIRS["runtime"] / "cell1_metadata.json"
 
+    # --- Cleaned data export ---
     # Saves cleaned hourly data in both Excel and Parquet formats.
     cleaned_output_df = prepare_cleaned_output(clean_df)
     cleaned_output_df.to_excel(cleaned_xlsx, index=False)
@@ -503,6 +511,7 @@ def main():
     # PLANNED OUTAGE TEMPLATE
     # ========================================================
 
+    # --- Planned outage template export ---
     # Creates a 24-hour outage planning template from the latest unit statuses.
     df_outage = clean_df.copy()
     df_outage["datetime"] = pd.to_datetime(df_outage["datetime"])
