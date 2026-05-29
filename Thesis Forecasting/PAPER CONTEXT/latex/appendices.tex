@@ -1,0 +1,143 @@
+\appendix
+
+\chapter{Data Cleaning and Preprocessing Artifacts}
+\section{Data Cleaning Rules}
+\begin{table}[H]
+\centering
+\caption{Summary of data cleaning and preprocessing rules}
+\label{tab:appendix_a_cleaning_rules}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llll}
+\hline
+Cleaning Step & Rule Applied & Purpose & Source/Output File \\
+\hline
+\multicolumn{4}{l}{See \texttt{tables/appendix\_A\_data\_cleaning\_rules.xlsx}.} \\
+\hline
+\end{tabular}}
+\end{table}
+
+\chapter{Complete Forecasting Feature List}
+\section{Feature Groups}
+\begin{table}[H]
+\centering
+\caption{Complete forecasting feature groups}
+\label{tab:appendix_b_feature_groups}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llll}
+\hline
+Feature Group & Feature Name or Pattern & Description & Used By \\
+\hline
+\multicolumn{4}{l}{See \texttt{tables/appendix\_B\_complete\_feature\_list.xlsx}.} \\
+\hline
+\end{tabular}}
+\end{table}
+
+\chapter{Model Hyperparameter Configuration}
+\begin{table}[H]
+\centering
+\caption{Hyperparameter configuration for RBFNN, Random Forest, and XGBoost models}
+\label{tab:appendix_c_model_hyperparameters}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llllll}
+\hline
+Model & Scope & Parameter & Value & Purpose & Source File \\
+\hline
+\multicolumn{6}{l}{See \texttt{tables/appendix\_C\_hyperparameters\_configuration\_all\_models.xlsx}.} \\
+\hline
+\end{tabular}}
+\end{table}
+
+\chapter{Benchmark Model Configuration}
+\begin{table}[H]
+\centering
+\caption{Benchmark model hyperparameter configuration}
+\label{tab:appendix_d_benchmark_configuration}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llll}
+\hline
+Model & Parameter & Value & Purpose \\
+\hline
+\multicolumn{4}{l}{See \texttt{tables/appendix\_D\_benchmark\_configuration.xlsx}.} \\
+\hline
+\end{tabular}}
+\end{table}
+
+\chapter{Planned Outage Input Template}
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{appendix_materials/screenshots/appendix_E_planned_outage_template.png}
+\caption{Planned outage input template for the 24-hour forecast horizon}
+\label{fig:appendix_e_planned_outage_template}
+\end{figure}
+
+\chapter{Sample Day-Ahead Forecast Output}
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{appendix_materials/screenshots/appendix_F_day_ahead_forecast_output.png}
+\caption{Sample 24-hour day-ahead RBFNN forecast output}
+\label{fig:appendix_f_day_ahead_forecast_output}
+\end{figure}
+
+\chapter{Graphical User Interface Dashboard Reference}
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{appendix_materials/screenshots/gui_reference/figure_G_1_dashboard_overview.png}
+\caption{Dashboard overview page}
+\label{fig:appendix_g_dashboard_overview}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{appendix_materials/screenshots/gui_reference/figure_G_2_data_management.png}
+\caption{Data management page}
+\label{fig:appendix_g_data_management}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{appendix_materials/screenshots/gui_reference/figure_G_3_planned_outage_planning.png}
+\caption{Planned outage planning page}
+\label{fig:appendix_g_planned_outage}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{appendix_materials/screenshots/gui_reference/figure_G_4_forecasting_results.png}
+\caption{Forecasting results page}
+\label{fig:appendix_g_forecasting_results}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{appendix_materials/screenshots/gui_reference/figure_G_5_system_operation_guide.png}
+\caption{System operation guide page}
+\label{fig:appendix_g_system_operation}
+\end{figure}
+
+\chapter{System User Guide and Execution Commands}
+\section{Execution Commands}
+\begin{verbatim}
+python scripts/cell1_clean_data.py
+python scripts/cell2_rbfnn.py --train
+python scripts/cell3_benchmark.py --train
+python scripts/cell4_generate_thesis_and_metrics.py
+python scripts/cell2_rbfnn.py
+python scripts/cell3_benchmark.py
+streamlit run streamlit_app.py
+\end{verbatim}
+
+\chapter{Additional Testing Results and Forecasting Plots}
+\section{Testing Metrics and Forecasting Figures}
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{appendix_materials/figures/appendix_I_testing_plots/benchmark_comparison/testing_mape_model_comparison.png}
+\caption{Testing MAPE comparison across forecasting models}
+\label{fig:appendix_i_testing_mape_comparison}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{appendix_materials/figures/appendix_I_testing_plots/benchmark_comparison/testing_rmse_model_comparison.png}
+\caption{Testing RMSE comparison across forecasting models}
+\label{fig:appendix_i_testing_rmse_comparison}
+\end{figure}

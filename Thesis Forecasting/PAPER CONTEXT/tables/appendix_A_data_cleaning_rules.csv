@@ -1,0 +1,13 @@
+Cleaning Step,Rule Applied,Purpose,Source/Output File
+Flattening of three-row Excel header,Merged multi-row Excel headers into a single machine-readable row.,Create consistent columns for automated cleaning.,scripts/cell1_clean_data.py; outputs/cleaned_data/cleaned_hourly_data.xlsx
+"Standardization of plant, unit, generation, outage, gate, elevation, rainfall, and outflow column names",Converted source labels into normalized snake_case field names.,Reduce ambiguity across plant and hydrologic variables.,outputs/cleaned_data/cleaned_hourly_data.xlsx
+Date and time conversion into hourly datetime,Parsed date and time fields into hourly chronological records.,"Support time-series alignment, lag creation, and resampling.",outputs/cleaned_data/cleaned_hourly_data.xlsx
+Near-zero generation treatment using 0.05 MW threshold,Treated generation values near zero as operational zero values.,Avoid numerical noise from being interpreted as true generation.,scripts/cell1_clean_data.py
+Short missing-gap interpolation up to 2 hours,Interpolated short missing gaps with a maximum length of two hours.,Fill isolated missing values without inventing long outages.,scripts/cell1_clean_data.py
+Short zero-run interpolation up to 2 hours,Interpolated zero runs up to two consecutive hours.,Smooth brief instrumentation dropouts.,scripts/cell1_clean_data.py
+Preservation of long zero runs of at least 3 hours,Kept zero runs of three hours or longer unchanged.,Preserve likely outage or non-generation events.,scripts/cell1_clean_data.py
+Spike smoothing using local-neighbor rule with factor 3.5,Smoothed local spikes exceeding the neighbor-based threshold.,Reduce isolated measurement spikes while retaining trend behavior.,scripts/cell1_clean_data.py
+KNN imputation with 5 neighbors,Used five-neighbor imputation for remaining missing values.,Recover incomplete operational and hydrologic records.,scripts/cell1_clean_data.py
+Hourly resampling,Resampled cleaned records to hourly frequency.,Ensure uniform time steps for forecasting.,outputs/cleaned_data/cleaned_hourly_data.xlsx
+Recalculation of plant total generation from unit-level generation,Recomputed plant totals from cleaned unit-level generation.,Keep total generation consistent with unit records.,outputs/cleaned_data/cleaned_hourly_data.xlsx
+Conversion of outage columns into binary unit status indicators,Encoded outage/unit availability as binary status fields.,Provide model-ready unit availability inputs.,outputs/outages_planning/Planned_Outages_Input.xlsx

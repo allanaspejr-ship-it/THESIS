@@ -1,0 +1,225 @@
+PPT CONTEXT: AI-Based Short-Term Generation Forecasting of Cascaded Hydroelectric Power Plants
+Source: main.pdf
+Style: formal thesis defense, English, 20-25 slides
+Output deck target: 22 slides
+
+SLIDE 1: AI-Based Short-Term Generation Forecasting of Cascaded Hydroelectric Power Plants
+Subtitle: Undergraduate Thesis Defense | Allan T. Aspe Jr. | Adviser: Noel R. Estoperez | May 2026
+What to put on the slide:
+- Focus: day-ahead generation forecasting for the Agus hydropower cascade
+- Method: Radial Basis Function Neural Network (RBFNN)
+- Purpose: support more reliable capacity nomination and operational planning
+Suggested visual: none required; use clean academic layout.
+Presenter cue: Open by naming the study, the forecasting problem, and the proposed AI-based solution.
+
+SLIDE 2: Presentation Outline
+What to put on the slide:
+- Chapter 1: Introduction, problem, objectives, and framework
+- Chapter 2: Related literature and research gaps
+- Chapter 3: Methodology and model development
+- Chapter 4: Results, benchmark comparison, and system output
+- Chapter 5: Conclusions and recommendations
+Suggested visual: none required; use clean academic layout.
+Presenter cue: Tell the panel the defense follows the thesis chapter flow from problem to findings.
+
+SLIDE 3: Chapter 1: Background of the Study
+What to put on the slide:
+- Hydropower supports Philippine grid reliability and energy supply.
+- The Agus-Pulangi complex is a major Mindanao hydropower resource.
+- The Agus cascade includes Agus 1, 2, 4, 5, 6, and 7, with about 746.1 MW combined capacity.
+- Generation is hydraulically coupled: upstream releases affect downstream inflow, head, and output.
+Suggested visual: none required; use clean academic layout.
+Presenter cue: Emphasize that the plants cannot be forecasted as completely independent units.
+
+SLIDE 4: Statement of the Problem
+What to put on the slide:
+- Day-ahead capacity nomination for Agus 1 to Agus 7 is frequently unstable.
+- Actual generation depends on hydrologic and operational variables such as elevation, outflow, gates, rainfall, and unit availability.
+- Incomplete or inconsistent operational inputs can lead to conservative estimates and re-nominations.
+- A data-driven model is needed to forecast short-term generation under nonlinear cascade behavior.
+Suggested visual: none required; use clean academic layout.
+Presenter cue: Connect the operational pain point to the need for a forecasting framework.
+
+SLIDE 5: Objectives of the Study
+What to put on the slide:
+- Develop an AI-based short-term generation forecasting framework for cascaded hydropower plants.
+- Clean and standardize historical operational and environmental data into an hourly time series.
+- Train and validate RBFNN models for the Agus cascade plants.
+- Evaluate performance using MAPE, MAE, RMSE, and R2.
+- Compare RBFNN results against Random Forest and XGBoost benchmark models.
+Suggested visual: none required; use clean academic layout.
+Presenter cue: Present the objectives as a direct answer to the instability of day-ahead nominations.
+
+SLIDE 6: Significance, Scope, and Limitations
+What to put on the slide:
+- The study supports capacity nomination, short-term planning, and operational decision-making.
+- Scope covers Agus 1, Agus 2, Agus 4, Agus 5, Agus 6, and Agus 7.
+- Forecast horizon is short-term/day-ahead hourly generation forecasting.
+- Model performance depends on available historical data quality and recorded operational variables.
+- The model is a decision-support tool, not a replacement for operator judgment or physical dispatch rules.
+Suggested visual: none required; use clean academic layout.
+Presenter cue: Clarify what the study contributes and what it does not claim to replace.
+
+SLIDE 7: Theoretical and Conceptual Framework
+What to put on the slide:
+- Cascaded hydropower generation links upstream discharge to downstream generation potential.
+- Forecasting estimates future generation from current and historical operating conditions.
+- RBFNN maps nonlinear input-output relationships using radial basis functions and output weights.
+- The proposed system uses historical plant, hydrologic, temporal, and availability features to forecast generation.
+Suggested visual: none required; use clean academic layout.
+Presenter cue: Explain why RBFNN is appropriate for nonlinear short-term hydropower behavior.
+
+SLIDE 8: Chapter 2: Review of Related Literature
+What to put on the slide:
+- Short-term forecasting is important for scheduling, market participation, and grid stability.
+- Cascaded systems are harder to model because upstream and downstream plants are hydraulically interdependent.
+- Traditional statistical approaches have limitations in nonlinear, multivariable operating conditions.
+- AI and machine learning models can capture complex patterns in noisy operational datasets.
+- RBFNNs are useful for nonlinear approximation, localized learning, and efficient training.
+Suggested visual: none required; use clean academic layout.
+Presenter cue: Summarize the literature as the basis for choosing an AI model and specifically RBFNN.
+
+SLIDE 9: Research Gaps
+What to put on the slide:
+- Many studies treat cascaded hydropower mainly as an optimization problem rather than a forecasting problem.
+- There is limited work focused on one-day-ahead, hourly generation forecasting for cascaded hydropower systems.
+- RBFNNs are underused as the main architecture for hydropower generation forecasting.
+- Some AI models use simple feature sets that do not sufficiently represent cascade dependencies and operating conditions.
+Suggested visual: none required; use clean academic layout.
+Presenter cue: State that the study addresses these gaps through an RBFNN-based cascade forecasting framework.
+
+SLIDE 10: Chapter 3: Research Design and Workflow
+What to put on the slide:
+- The study follows a quantitative, data-driven forecasting design.
+- Workflow: data cleaning, feature engineering, model training, validation/testing, benchmark comparison, and day-ahead forecasting.
+- Models are trained using chronological time-series data to preserve real forecasting order.
+- Outputs include performance metrics, forecast plots, benchmark comparisons, and day-ahead forecasts.
+Suggested visual: none required; use clean academic layout.
+Presenter cue: Walk through the workflow from raw data to final forecast output.
+
+SLIDE 11: Data Collection and Processing
+What to put on the slide:
+- Historical operational and environmental data were organized into hourly records.
+- Data cleaning handled inconsistent headers, date-time alignment, numeric conversion, missing values, near-zero values, short zero runs, and spikes.
+- Plant-level generation was recalculated from cleaned unit-level generation values.
+- Unit outage states were converted into binary availability indicators.
+Suggested visual: Thesis Forecasting\thesis_figures\cleaned_profiles\figure_4_01_agus1_cleaned_profile.png
+Presenter cue: Use the cleaned profile as an example of the prepared hourly generation series.
+
+SLIDE 12: Feature Engineering and Dataset Split
+What to put on the slide:
+- Input features include temporal indicators, lagged generation values, rolling statistics, generation differences, hydrologic variables, gate/elevation variables, and unit availability.
+- Cascade-aware upstream generation features were included based on plant order.
+- The final cleaned dataset contains 13,128 hourly rows and 55 columns.
+- Chronological split: 70% training, 15% validation, and 15% testing.
+- Testing period represents unseen data from April 11, 2025 to June 30, 2025.
+Suggested visual: none required; use clean academic layout.
+Presenter cue: Stress that chronological splitting prevents future data leakage.
+
+SLIDE 13: Feature Engineering Inputs
+What to put on the slide:
+- Temporal features help the model learn hourly, weekly, monthly, weekend, and target-hour patterns.
+- Lag features use previous generation values, such as 1 hour, 24 hours, and 168 hours before the forecast.
+- Rolling features summarize recent behavior using moving mean, standard deviation, minimum, and maximum values.
+- Outage features show unit availability and number of running units, which limit possible generation.
+- Hydrologic features represent water-related conditions such as rainfall, outflow, elevation, gate, and spillway variables.
+- Upstream cascade features help downstream plants account for upstream generation and water-release effects.
+Suggested visual: none required; use clean academic layout.
+Presenter cue: Explain that these features convert cleaned data into model-ready inputs for the RBFNN.
+
+SLIDE 14: RBFNN Model Development
+What to put on the slide:
+- One RBFNN model was developed for each Agus plant.
+- The model uses radial basis functions to represent nonlinear operating regimes.
+- A residual or delta formulation predicts generation changes relative to current output.
+- This helps keep short-term forecasts anchored to recent operating conditions.
+- Model training used normalized variables and Mean Squared Error as the optimization objective.
+- Tuned settings included the number of RBF centers, learning rate, and shrinkage value.
+- RBF spreads were represented by trainable gamma values, initialized at 1.0 and learned during training.
+Suggested visual: none required; use clean academic layout.
+Presenter cue: Explain that centers and learning rate were selected through validation, while spreads/gamma were optimized as trainable model parameters.
+
+SLIDE 15: Benchmark Models and Evaluation Metrics
+What to put on the slide:
+- Benchmark models: Random Forest and XGBoost.
+- Metrics used: MAPE, MAE, RMSE, and R2.
+- MAPE measures relative percentage error and is easy to interpret for forecasting accuracy.
+- MAE and RMSE measure error magnitude in MW, with RMSE penalizing larger errors more strongly.
+- R2 measures how well the model explains generation variability.
+Suggested visual: none required; use clean academic layout.
+Presenter cue: Frame the benchmark comparison as an unbiased test of whether RBFNN is actually better.
+
+SLIDE 16: Chapter 4: Dataset Overview and Cleaned Data Results
+What to put on the slide:
+- The processed dataset provides complete hourly records for the modeled Agus plants.
+- Cleaned generation profiles preserve real operating patterns while reducing data quality issues.
+- The prepared dataset supports plant-level model training and total cascade assessment.
+- Input variables combine generation history, availability, hydrologic signals, and temporal patterns.
+Suggested visual: Thesis Forecasting\thesis_figures\cleaned_profiles\figure_4_05_agus6_cleaned_profile.png
+Presenter cue: Use the figure to show that the model input comes from cleaned operational time-series data.
+
+SLIDE 17: RBFNN Validation Results
+What to put on the slide:
+- Average validation performance for the Agus cascade: MAPE 2.615%, MAE 1.633 MW, RMSE 3.789 MW, R2 0.878.
+- Training and validation loss curves showed rapid early convergence followed by stable behavior.
+- Validation loss remained slightly higher than training loss, which is expected for unseen data.
+- No severe overfitting was observed because the train-validation gap stayed small and stable.
+Suggested visual: none required; use clean academic layout.
+Presenter cue: Present validation as evidence that the model learned patterns before final testing.
+
+SLIDE 18: RBFNN Testing Performance
+What to put on the slide:
+- Overall testing performance: MAPE 2.519%, MAE 1.355 MW, RMSE 3.575 MW, R2 0.925.
+- Plant-level testing MAPE: Agus 1 = 3.476%, Agus 2 = 1.372%, Agus 4 = 0.611%, Agus 5 = 4.040%, Agus 6 = 1.405%, Agus 7 = 4.209%.
+- All plants remained below 10% MAPE.
+- Agus 4 had the lowest MAPE, while Agus 7 showed higher variability.
+Suggested visual: Thesis Forecasting\thesis_figures\error_analysis\rbfnn_testing_mape_per_plant.png
+Presenter cue: Use the testing numbers as the main performance claim of the study.
+
+SLIDE 19: Actual vs Forecast and Error Analysis
+What to put on the slide:
+- Forecast curves closely followed actual generation patterns during the testing period.
+- The model captured both timing and magnitude of short-term changes.
+- Scatter and residual analyses showed strong agreement between actual and predicted values.
+- Mean residual was near zero, indicating no strong systematic overprediction or underprediction.
+Suggested visual: Thesis Forecasting\thesis_figures\testing_actual_vs_forecast\figure_4_13_agus1_testing_actual_vs_forecast.png
+Presenter cue: Explain that good numerical results are supported by visual tracking and low bias.
+
+SLIDE 20: Benchmark Model Comparison
+What to put on the slide:
+- RBFNN achieved the lowest overall testing MAPE at 2.519%.
+- Random Forest achieved 5.864% overall testing MAPE.
+- XGBoost achieved 8.876% overall testing MAPE.
+- RBFNN also produced lower MAE and RMSE than the benchmark models.
+- The advantage was especially visible under complex operating behavior such as Agus 6.
+Suggested visual: Thesis Forecasting\thesis_figures\benchmark_comparison\testing_mape_model_comparison.png
+Presenter cue: Make the key comparison clear: RBFNN outperformed both benchmark models overall.
+
+SLIDE 21: Day-Ahead Forecast and GUI Implementation
+What to put on the slide:
+- The final system generates hourly day-ahead forecasts using the trained RBFNN models.
+- Planned unit outage schedules are included as operational inputs.
+- Forecast outputs support plant-level and total cascade generation planning.
+- A dashboard interface was implemented to make the forecasting workflow easier to use and review.
+Suggested visual: Thesis Forecasting\thesis_figures\day_ahead_forecast\total_cascade_day_ahead_forecast_with_benchmarks.png
+Presenter cue: Shift from model evaluation to practical deployment and operational usefulness.
+
+SLIDE 22: Chapter 5: Conclusions
+What to put on the slide:
+- The study successfully developed an AI-based RBFNN framework for short-term Agus cascade generation forecasting.
+- The cleaned and engineered dataset enabled reliable model training from historical operational data.
+- The RBFNN achieved accurate testing performance with 2.519% average MAPE and R2 of 0.925.
+- The proposed model outperformed Random Forest and XGBoost benchmark models.
+- The framework is suitable as a decision-support tool for day-ahead capacity nomination and short-term planning.
+Suggested visual: none required; use clean academic layout.
+Presenter cue: Return to the objectives and show that each objective was addressed.
+
+SLIDE 23: Recommendations
+What to put on the slide:
+- Continuously update the model as new operational and hydrologic data become available.
+- Improve data completeness and consistency for rainfall, flows, gate operations, and unit availability.
+- Test the framework under more operating conditions, including unusual hydrologic events and outage scenarios.
+- Explore additional hybrid or optimized AI models for future comparison.
+- Integrate the forecasting tool further into operational planning workflows for capacity nomination support.
+Suggested visual: none required; use clean academic layout.
+Presenter cue: End by emphasizing improvement, deployment, and future research directions.

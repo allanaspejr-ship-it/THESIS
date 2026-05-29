@@ -1,0 +1,13 @@
+Model,Parameter,Value,Purpose
+Random Forest,n_estimators,400,Number of trees in the ensemble.
+Random Forest,min_samples_leaf,2,Minimum samples required at a leaf node.
+Random Forest,random_state,42,Reproducibility seed.
+Random Forest,n_jobs,1,Single-worker execution for reproducible local runs.
+XGBoost,n_estimators,500,Number of boosted trees.
+XGBoost,learning_rate,0.03,Step size for boosting updates.
+XGBoost,max_depth,4,Maximum tree depth.
+XGBoost,subsample,0.9,Row sampling fraction per tree.
+XGBoost,colsample_bytree,0.9,Column sampling fraction per tree.
+XGBoost,objective,reg:squarederror,Squared-error regression objective.
+XGBoost,random_state,42,Reproducibility seed.
+XGBoost,n_jobs,1,Single-worker execution for reproducible local runs.

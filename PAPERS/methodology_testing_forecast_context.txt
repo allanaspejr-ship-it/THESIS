@@ -1,0 +1,339 @@
+METHODOLOGY CONTEXT: DATA PROCESSING UP TO FORECASTING
+Source basis: main.pdf and Thesis Forecasting workflow
+Purpose: explain the methodology from data processing to model testing and day-ahead forecasting
+
+
+MAIN METHODOLOGY IDEA
+
+The methodology starts with raw hydropower operational data, cleans and standardizes it into an hourly time-series dataset, creates forecasting features, trains plant-specific RBFNN models, evaluates the models through validation and testing forecasts, compares the results against benchmark models, and finally generates a 24-hour day-ahead forecast.
+
+The testing phase is part of the forecasting methodology. It is a historical forecast or backtesting stage, where the model forecasts an unseen past period and the predicted generation is compared with actual recorded generation. The final day-ahead forecast is the operational forecast, where the next 24 hours are predicted before actual values are known.
+
+
+RECOMMENDED PPT SLIDE TITLE
+
+Methodology: From Data Processing to Forecasting
+
+
+WHAT TO PUT ON THE SLIDE
+
+- Raw Agus hydropower data were cleaned and converted into hourly time-series records.
+- Missing values and short data gaps were handled using interpolation and KNN imputation.
+- Time-series, hydrologic, operational, outage, and cascade-aware features were engineered.
+- The dataset was split chronologically into training, validation, and testing sets.
+- Plant-specific RBFNN models were trained and evaluated using unseen validation and testing data.
+- The final trained model generated a 24-hour day-ahead forecast with planned outage inputs.
+
+
+1. RAW DATA PREPARATION
+
+The raw Excel dataset contained historical operational and environmental records for the Agus cascade. The modeled plants were:
+
+- Agus 1
+- Agus 2
+- Agus 4
+- Agus 5
+- Agus 6
+- Agus 7
+
+The first preprocessing task was to make the raw file usable for machine learning. The workflow flattened the multi-row Excel headers, standardized the column names, rebuilt datetime values from the date and time fields, converted numeric columns into proper numeric format, and organized the records into a consistent hourly time-series dataset.
+
+Suggested defense wording:
+
+"The raw operational data first had to be standardized because the original Excel file contained multi-row headers, mixed column names, and different data formats. The cleaning process converted the records into a consistent hourly time-series dataset suitable for forecasting."
+
+
+2. DATA CLEANING AND PREPROCESSING METHODS USED
+
+The cleaning process used several specific methods:
+
+- Header cleaning: the multi-row Excel header was flattened into one consistent column name per variable.
+- Column standardization: plant, unit, generation, outage, gate, elevation, rainfall, and outflow columns were renamed into predictable formats.
+- Datetime reconstruction: date and time fields were combined to rebuild hourly timestamps.
+- Numeric conversion: generation, hydrologic, and operational variables were converted into numeric values.
+- Near-zero treatment: generation values less than or equal to 0.05 MW were treated as zero to remove tiny measurement noise.
+- Short missing-gap interpolation: missing gaps up to 2 hours were filled by interpolation.
+- Short zero-run interpolation: zero-generation sequences up to 2 hours were interpolated when treated as likely recording gaps.
+- Long zero-run preservation: zero-generation sequences of 3 hours or longer were preserved as possible real non-operating or outage periods.
+- Spike smoothing: isolated spikes were smoothed using a local-neighbor rule with a spike factor of 3.5.
+- KNN imputation: remaining missing numeric values were filled using K-Nearest Neighbors imputation with 5 neighbors.
+- Hourly resampling: the cleaned data were resampled into hourly frequency.
+- Plant total recalculation: total plant generation was recalculated from cleaned unit-level generation.
+- Outage conversion: outage/status fields were converted into binary indicators, where 1 means available/running and 0 means unavailable/outage.
+
+Important specific answer:
+
+For cleaning, the workflow used both interpolation and imputation.
+
+- Interpolation was used for short missing gaps and short zero runs.
+- KNN imputation was used for remaining missing numeric values.
+- The specific imputation method was K-Nearest Neighbors imputation with 5 neighbors.
+
+Suggested defense wording:
+
+"For missing values, we did not use only one method. Short gaps were handled using interpolation because nearby hourly values can reasonably estimate brief missing periods. For remaining missing numeric values, KNN imputation with 5 neighbors was used because it estimates missing values based on similar records in the dataset."
+
+
+3. CLEANED DATA OUTPUT
+
+After cleaning, the dataset contained:
+
+- 13,128 hourly rows
+- 55 columns
+- latest timestamp: 2025-06-30 23:00:00
+
+The cleaned data were saved as Excel and Parquet files for downstream model training and forecasting. The cleaning stage also generated a planned outage input workbook for the next 24-hour forecast horizon.
+
+Suggested defense wording:
+
+"After preprocessing, the cleaned dataset contained 13,128 hourly records and 55 columns. This cleaned dataset became the main input for feature engineering, model training, validation, testing, and day-ahead forecasting."
+
+
+4. FEATURE ENGINEERING
+
+After cleaning, feature engineering was performed to help the model learn temporal behavior, plant operating conditions, and cascade relationships. The features included:
+
+- Time indicators such as hour, day, month, weekend, and cyclical time features.
+- Target-hour indicators for the hour being forecasted.
+- Current plant generation.
+- Lagged generation values at 1, 2, 3, 6, 12, 24, 48, 72, and 168 hours.
+- Rolling statistics using 3, 6, 12, 24, 48, and 168-hour windows.
+- Rolling mean, standard deviation, minimum, and maximum.
+- Generation difference features at 1, 3, and 24 hours.
+- Same-hour historical references, such as previous-day and previous-week same-hour behavior.
+- Unit outage or availability indicators.
+- Number of running units and plant availability features.
+- Plant-specific gate, elevation, and spillway variables.
+- Rainfall and Lake Lanao outflow lag variables.
+- Upstream cascade generation features.
+
+The cascade order used was:
+
+Agus 1 -> Agus 2 -> Agus 4 -> Agus 5 -> Agus 6 -> Agus 7
+
+Suggested defense wording:
+
+"The feature engineering step allowed the model to use not only the current generation value, but also previous generation behavior, rolling trends, outage conditions, hydrologic variables, and upstream cascade effects."
+
+
+5. NORMALIZATION
+
+The RBFNN model used standard scaling for input features and target delta values. StandardScaler was used so that variables with different units and magnitudes would be placed on a comparable scale before training.
+
+Suggested defense wording:
+
+"Before model training, the input variables and target delta values were standardized. This was necessary because the dataset contains variables with different units, such as MW, rainfall, gate positions, and elevation."
+
+
+6. DATASET SPLITTING
+
+The dataset was split chronologically, not randomly, because the study is a time-series forecasting problem. Random splitting was avoided to prevent future information from leaking into model training.
+
+The split used was:
+
+- Training set: first 70 percent of the data
+- Validation set: next 15 percent of the data
+- Testing set: final 15 percent of the data
+
+The testing prediction period covered unseen chronological data from April 11, 2025 00:00 to June 30, 2025 23:00.
+
+Suggested defense wording:
+
+"The dataset was split chronologically because forecasting must follow time order. The model should learn from past data and then be evaluated on later unseen data."
+
+
+7. RBFNN MODEL TRAINING
+
+The main forecasting model was a Radial Basis Function Neural Network. One RBFNN model was trained for each Agus plant.
+
+The RBFNN design included:
+
+- Gaussian radial basis hidden layer.
+- Trainable RBF centers and gamma values.
+- KMeans initialization of RBF centers.
+- RBF spreads represented through trainable gamma values initialized at 1.0.
+- Dense linear output layer.
+- Adam optimizer.
+- Mean Squared Error training loss.
+- Early stopping based on validation loss.
+- Standard-scaled input features and target deltas.
+
+The main settings tuned using validation performance were:
+
+- Number of RBF centers: 80, 120, and 180.
+- Learning rate: 0.001 and 0.0005.
+- Shrinkage value: 0.05, 0.10, 0.20, 0.35, 0.50, 0.75, 1.00, and 1.15.
+- Bias correction and selected post-calibration settings.
+
+The RBF spreads were not manually selected through a grid search. Instead, the spreads were represented by gamma values inside the RBF layer. These gamma values were initialized at 1.0 and learned during training through backpropagation using the Adam optimizer and MSE loss.
+
+The model used a residual or delta forecasting approach. Instead of directly predicting the next generation level, the model predicted the change in generation relative to the current generation. The final forecast was then reconstructed by adding the predicted change to the current/persistence value.
+
+Suggested defense wording:
+
+"The RBFNN was trained as a residual or delta model. The number of centers, learning rate, and shrinkage value were tuned using validation performance. The RBF spreads were represented by trainable gamma values, initialized at 1.0, and learned during training. Instead of directly predicting the next generation value, the model predicted the change from the current generation, which helped keep the forecast stable and anchored to the latest operating condition."
+
+
+8. VALIDATION AND TESTING FORECASTS
+
+Validation and testing were used to evaluate whether the trained model could forecast unseen data.
+
+Validation:
+
+- Used after training data.
+- Helped monitor model behavior and generalization.
+- Helped detect overfitting.
+
+Testing:
+
+- Used the final unseen chronological portion of the dataset.
+- Simulated forecasting on historical data that the model did not use during training.
+- Forecasted values were compared with actual recorded generation values.
+- This is also called historical forecasting or backtesting.
+
+The testing phase is still a forecast because the model treats the testing period as unknown. However, it is not the final operational forecast because the actual values already exist and are used for accuracy evaluation.
+
+Suggested defense wording:
+
+"The testing phase is a historical forecast. The model forecasts an unseen past period, and then we compare the forecasted values with the actual recorded generation values. This validates the model before using it for the real day-ahead forecast."
+
+
+9. EVALUATION METRICS
+
+The model was evaluated using:
+
+- Operational MAPE
+- MAE
+- RMSE
+- R2
+
+Operational MAPE was used instead of ordinary MAPE for very low generation periods because percentage error becomes unstable when actual generation is near zero. The operational MAPE excludes very low actual generation values where percentage error would be misleading. MAE, RMSE, and R2 were computed using all rows.
+
+Suggested defense wording:
+
+"MAPE was used to measure relative forecasting error, but an operational MAPE definition was applied to avoid misleading percentage errors during very low generation periods. MAE and RMSE measured error in MW, while R2 measured how well the model explained generation variability."
+
+
+10. BENCHMARK MODEL COMPARISON
+
+To prove that the RBFNN model was not only accurate by itself but also better than other models, the study trained benchmark models using the same chronological split and evaluation metrics.
+
+Benchmark models used:
+
+- Random Forest Regressor
+- XGBoost Regressor
+
+The benchmark models used time indicators, current generation, lagged generation, rolling statistics, outage status, and running-unit features. Their results were compared with the RBFNN testing results.
+
+Suggested defense wording:
+
+"Random Forest and XGBoost were used as benchmark models. They provided a fair comparison to determine whether the RBFNN offered better forecasting performance under the same chronological split and evaluation metrics."
+
+
+11. DAY-AHEAD FORECASTING PROCEDURE
+
+After training and evaluation, the RBFNN was used to generate the final operational forecast.
+
+The day-ahead forecasting procedure:
+
+1. Load the latest cleaned historical data.
+2. Load the planned outage schedule for the forecast date.
+3. Build the required feature row from the most recent historical data.
+4. Predict plant-level generation using the trained RBFNN models.
+5. Generate forecasts recursively for 24 hours.
+6. Apply planned outage constraints at the unit level.
+7. Allocate plant-level generation to available units while respecting unit capacities.
+8. Recalculate plant totals and total cascade generation.
+9. Save the 24-hour forecast output to Excel and CSV.
+
+The forecast horizon was:
+
+- July 01, 2025
+- Hours 1 to 24
+
+Suggested defense wording:
+
+"After the model was validated and tested, it was used to generate the 24-hour day-ahead forecast. The forecast used the latest historical data and planned outage schedule, then produced hourly plant-level, unit-level, and total cascade generation forecasts."
+
+
+12. DIFFERENCE BETWEEN TESTING FORECAST AND DAY-AHEAD FORECAST
+
+Testing forecast:
+
+- Uses unseen historical data.
+- Actual values are already known.
+- Purpose is model evaluation.
+- Accuracy can be computed immediately.
+- Also called backtesting or historical forecasting.
+
+Day-ahead forecast:
+
+- Uses the latest available data and planned outage inputs.
+- Actual future values are not yet known.
+- Purpose is operational forecasting.
+- Accuracy can only be checked later after actual generation is recorded.
+- Supports capacity nomination and short-term planning.
+
+Short defense answer:
+
+"Testing is a forecast used for evaluation, while day-ahead forecasting is the actual future forecast used for operation."
+
+
+13. COMPLETE METHODOLOGY FLOW FOR PPT
+
+1. Raw Excel data collection from Agus cascade operational records.
+2. Header flattening, column standardization, datetime reconstruction, and numeric conversion.
+3. Data cleaning using near-zero treatment, short-gap interpolation, short zero-run interpolation, spike smoothing, and KNN imputation with 5 neighbors.
+4. Hourly resampling, plant-total recalculation, and outage/status conversion into binary indicators.
+5. Feature engineering using temporal, lag, rolling, operational, hydrologic, outage, and upstream cascade features.
+6. Standard scaling of input features and target delta values.
+7. Chronological data split into 70 percent training, 15 percent validation, and 15 percent testing.
+8. Plant-specific RBFNN training using KMeans-initialized RBF centers, trainable gamma/spread values, Adam optimizer, MSE loss, and early stopping.
+9. Validation and testing forecasts to measure generalization on unseen chronological data.
+10. Model evaluation using operational MAPE, MAE, RMSE, and R2.
+11. Benchmark comparison against Random Forest and XGBoost.
+12. Final 24-hour day-ahead forecasting using latest historical data and planned outage inputs.
+
+
+POSSIBLE PANEL QUESTIONS AND ANSWERS
+
+Question:
+What method did you use for missing values?
+
+Answer:
+Short missing gaps were filled using interpolation, specifically for gaps up to 2 hours. Remaining missing numeric values were handled using KNN imputation with 5 neighbors.
+
+Question:
+Why did you use interpolation and KNN imputation?
+
+Answer:
+Interpolation is suitable for short hourly gaps because nearby values can reasonably estimate brief missing periods. KNN imputation was used for remaining missing values because it estimates values based on similar records and relationships among variables.
+
+Question:
+Did you randomly split the dataset?
+
+Answer:
+No. The dataset was split chronologically into 70 percent training, 15 percent validation, and 15 percent testing. Random splitting was avoided because this is a time-series forecasting problem.
+
+Question:
+Is the testing phase already the day-ahead forecast?
+
+Answer:
+No. Testing is a historical forecast used for evaluation. The model forecasts unseen past data, then the forecast is compared with actual values. The day-ahead forecast is the actual future forecast for the next 24 hours.
+
+Question:
+Why did you use a residual or delta model?
+
+Answer:
+The residual model predicts the change from the current generation instead of predicting the whole generation value directly. This keeps the forecast anchored to recent operating conditions and improves short-term forecast stability.
+
+
+SHORT SCRIPT FOR METHODOLOGY PRESENTATION
+
+"The methodology begins with cleaning the raw Agus hydropower dataset. The raw Excel headers were flattened, column names were standardized, date and time were rebuilt into hourly timestamps, and numeric fields were converted. For data cleaning, near-zero generation values were treated as zero, short missing gaps up to 2 hours were interpolated, short zero runs were also interpolated, longer zero runs were preserved, isolated spikes were smoothed, and remaining missing numeric values were handled using KNN imputation with 5 neighbors.
+
+After cleaning, the dataset was resampled hourly, plant totals were recalculated from unit-level generation, and outage status columns were converted into binary availability indicators. Then, feature engineering was performed using time indicators, lagged generation, rolling statistics, generation differences, outage features, hydrologic variables, and upstream cascade features.
+
+The dataset was split chronologically into 70 percent training, 15 percent validation, and 15 percent testing. One RBFNN model was trained for each Agus plant using standardized input features and target delta values. The model used a residual forecasting approach, meaning it predicted the change in generation relative to the current generation.
+
+The testing phase served as a historical forecasting or backtesting step. The model forecasted unseen historical data, and the predictions were compared with actual generation using operational MAPE, MAE, RMSE, and R2. After validation and testing, the trained model was used to generate the final 24-hour day-ahead forecast using the latest historical data and planned outage inputs."
