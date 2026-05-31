@@ -728,6 +728,15 @@ A. No. Cleaned data means the raw dataset was fixed and made usable by handling 
 Q149. Why was standardization needed after data cleaning?
 A. Standardization was needed because the model inputs have different units and scales, such as MW generation, rainfall, reservoir elevation, gate variables, and outflow. Scaling these variables using StandardScaler helps the RBFNN train more stably and prevents large-magnitude variables from dominating smaller-scale variables.
 
+Q150. Where does KNN imputation apply in the cleaning process?
+A. KNN imputation is applied after the basic cleaning steps, short-gap interpolation, short zero-run handling, spike smoothing, and numeric conversion. It is used only for remaining missing numeric values in the cleaned operational and hydrologic columns, such as generation, gate, elevation, rainfall, outflow, and related numeric fields. It does not replace long zero-generation runs that were intentionally preserved as possible outage or non-generation conditions.
+
+Q151. What hyperparameters does Adam optimize?
+A. Adam does not optimize hyperparameters such as the learning rate, number of RBF centers, epochs, or batch size. Those are set or searched by the training code. Adam optimizes the trainable model parameters during training, including the RBF layer centers, gamma values, and the output layer weights and bias, by updating them to reduce the mean squared error loss.
+
+Q152. What are the strengths and weaknesses of your thesis, and how can the weaknesses be addressed?
+A. The strengths of the thesis are that it uses real Agus cascade hourly generation data, applies a complete cleaning and preprocessing workflow, considers planned unit outages, uses a cascade-aware and hydrology-aware RBFNN feature set, evaluates the model using chronological validation and testing data, compares the RBFNN against Random Forest and XGBoost benchmarks, and produces a practical 24-hour day-ahead forecast at unit, plant, and cascade level. The main weaknesses are that the model depends on the quality and availability of historical records, the forecast horizon is limited to short-term day-ahead forecasting, the planned outage file must be accurately updated by the user, and the model was tested on historical data from one cascade system only. These weaknesses can be addressed by continuously updating the dataset, adding more years of data, validating the system on future unseen operating periods, improving outage input integration, testing the method on other hydroelectric systems, and adding more real-time hydrologic or operational variables if available.
+
 
 MEMORIZE THESE NUMBERS
 

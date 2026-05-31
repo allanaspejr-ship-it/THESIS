@@ -19,6 +19,14 @@ The active code is in:
 Thesis Forecasting/scripts/
 ```
 
+The paper, documentation, and appendix support materials are now organized in:
+
+```text
+Thesis Forecasting/PAPER CONTEXT/
+```
+
+This `PAPER CONTEXT` folder is not the runtime model folder. It is a thesis-support folder containing documentation, appendix-ready tables, LaTeX appendix files, copied/reference figures, screenshot-style table images, and the appendix generator script. The forecasting scripts still run from `Thesis Forecasting/scripts/` and still read/write the active runtime folders under `Thesis Forecasting/outputs/`, `Thesis Forecasting/models/`, `Thesis Forecasting/metadata/`, and `Thesis Forecasting/benchmark/`.
+
 The main scripts are:
 
 ```text
@@ -45,6 +53,13 @@ python "Thesis Forecasting/scripts/cell3_benchmark.py" --train
 ```
 
 Without `--train`, Cell 2 and Cell 3 load saved models, evaluate them, and generate forecasts.
+
+Recent verification after folder cleanup:
+
+- `python scripts/cell2_rbfnn.py` completed in forecast-only mode.
+- `python scripts/cell3_benchmark.py` completed in forecast-only/default mode.
+- RBFNN, Random Forest, and XGBoost day-ahead forecast workbooks were regenerated successfully.
+- Each generated forecast workbook had `24` rows and `26` columns.
 
 ## Cell 1: Cleaning Code Context
 
@@ -434,6 +449,154 @@ It creates figures for:
 - Model comparison charts
 - Day-ahead total cascade forecast comparison
 
+## Paper Context and Appendix Materials
+
+Current thesis-support directory:
+
+```text
+Thesis Forecasting/PAPER CONTEXT/
+```
+
+This folder now contains the written context files and appendix materials generated to support the thesis titled:
+
+```text
+AI-Based Short-Term Generation Forecasting of Cascaded Hydroelectric Power Plants
+```
+
+Important files and folders in `PAPER CONTEXT`:
+
+```text
+CODE_CONTEXT_CLEANING_TRAINING_FORECASTING.md
+CHAPTER_3_4_5_CONTEXT.md
+DASHBOARD_UPDATE_DOCUMENTATION.md
+THESIS_FORECASTING_DOCUMENTATION.md
+README.md
+generate_appendix_materials.py
+appendix_summary.xlsx
+tables/
+figures/
+screenshots/
+latex/
+```
+
+The appendix generator is:
+
+```text
+Thesis Forecasting/PAPER CONTEXT/generate_appendix_materials.py
+```
+
+It reads the active thesis forecasting outputs and metadata where available, then regenerates appendix materials inside `PAPER CONTEXT` only. It does not retrain models and does not modify the active scripts, models, cleaned data, benchmark outputs, or thesis chapters.
+
+Main source files used by the appendix generator:
+
+```text
+Thesis Forecasting/outputs/cleaned_data/cleaned_hourly_data.xlsx
+Thesis Forecasting/outputs/cleaned_data/cleaned_hourly_data.parquet
+Thesis Forecasting/outputs/cleaned_data/cell1_metadata.json
+Thesis Forecasting/outputs/outages_planning/Planned_Outages_Input.xlsx
+Thesis Forecasting/outputs/rbfnn_forecast/Day_Ahead_24H_RBFNN_Forecast.xlsx
+Thesis Forecasting/metadata/overall_metrics/rbfnn_validation_testing_metrics.xlsx
+Thesis Forecasting/metadata/overall_metrics/random_forest_validation_testing_metrics.xlsx
+Thesis Forecasting/metadata/overall_metrics/xgboost_validation_testing_metrics.xlsx
+Thesis Forecasting/models/rbfnn/meta_agus*.json
+Thesis Forecasting/thesis_figures/
+Thesis Forecasting/outputs/testing_plots/
+```
+
+Appendix outputs currently generated in `PAPER CONTEXT/tables/` include:
+
+- Appendix A data cleaning rules and cleaned dataset summary.
+- Appendix B complete feature group list and per-plant RBFNN feature sheets.
+- Appendix C model hyperparameter configuration for RBFNN, Random Forest, and XGBoost.
+- Appendix D benchmark configuration.
+- Appendix E planned outage input template and outage status legend.
+- Appendix F day-ahead forecast sample and daily generation summary.
+- Appendix G GUI screenshot captions.
+- Appendix H execution commands.
+- Appendix I testing metrics summary.
+- Picture catalog and one Excel table per appendix PNG picture.
+
+Appendix C was expanded so it is no longer limited to the RBFNN only. It now includes:
+
+```text
+tables/appendix_C_hyperparameters_configuration_all_models.xlsx
+tables/appendix_C_model_hyperparameters_configuration.xlsx
+tables/appendix_C_model_hyperparameters_configuration.csv
+tables/appendix_C_rbfnn_hyperparameters.xlsx
+tables/appendix_C_rbfnn_hyperparameters.csv
+```
+
+The combined Appendix C workbook contains:
+
+- `All Model Hyperparameters`
+- `RBFNN By Plant`
+- `Random Forest XGBoost`
+
+The RBFNN rows use factual selected settings from:
+
+```text
+Thesis Forecasting/models/rbfnn/meta_agus1.json
+Thesis Forecasting/models/rbfnn/meta_agus2.json
+Thesis Forecasting/models/rbfnn/meta_agus4.json
+Thesis Forecasting/models/rbfnn/meta_agus5.json
+Thesis Forecasting/models/rbfnn/meta_agus6.json
+Thesis Forecasting/models/rbfnn/meta_agus7.json
+```
+
+The Random Forest and XGBoost rows use factual settings from:
+
+```text
+Thesis Forecasting/scripts/cell3_benchmark.py
+```
+
+The picture catalog files are:
+
+```text
+tables/appendix_picture_catalog.xlsx
+tables/appendix_picture_catalog.csv
+tables/appendix_picture_tables_by_section.xlsx
+tables/picture_tables/
+```
+
+The `tables/picture_tables/` folder contains one Excel file per PNG image. Each table records factual information such as appendix section, picture filename, appendix path, source file or workbook, image type, pixel size, file size, caption, and thesis use.
+
+Screenshot-style table images created from real workbook data are:
+
+```text
+screenshots/appendix_E_planned_outage_template.png
+screenshots/appendix_F_day_ahead_forecast_output.png
+```
+
+These are not invented dashboard screenshots. They are generated table images based on:
+
+```text
+outputs/outages_planning/Planned_Outages_Input.xlsx
+outputs/rbfnn_forecast/Day_Ahead_24H_RBFNN_Forecast.xlsx
+```
+
+The GUI screenshot folder contains only instructions:
+
+```text
+screenshots/gui_reference/README_GUI_SCREENSHOTS.txt
+```
+
+Actual GUI screenshots should be manually placed there when available.
+
+LaTeX appendix files generated:
+
+```text
+latex/appendices.tex
+latex/appendix_H_user_guide.tex
+```
+
+The master workbook is:
+
+```text
+appendix_summary.xlsx
+```
+
+It includes summary sheets for appendix list, data cleaning rules, feature groups, model hyperparameters, benchmark configuration, outage legend, execution commands, testing metrics, and picture catalog.
+
 ## What Was Done Overall
 
 The codebase was organized into a complete thesis forecasting pipeline:
@@ -446,5 +609,9 @@ The codebase was organized into a complete thesis forecasting pipeline:
 6. Random Forest and XGBoost benchmarks are trained or loaded using the same split.
 7. Benchmark metrics, testing predictions, and day-ahead forecasts are generated.
 8. Thesis figures and organized metadata are created for Chapter 4 discussion.
+9. Paper and thesis-support materials were moved into `Thesis Forecasting/PAPER CONTEXT/` for clearer separation from runtime code.
+10. Appendix-ready Excel, CSV, PNG, and LaTeX files were generated under `PAPER CONTEXT`.
+11. Appendix C was updated to cover RBFNN, Random Forest, and XGBoost model hyperparameters.
+12. A picture catalog and individual Excel information table for each appendix PNG picture were created.
 
 The key technical contribution is the RBFNN residual/delta forecasting approach with cascade-aware and outage-aware features, followed by validation-tuned correction and unit-capacity-aware forecast allocation.
