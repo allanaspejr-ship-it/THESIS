@@ -197,28 +197,7 @@ def run_lengths(mask):
 
 # Fills short missing gaps while leaving longer data gaps for later imputation.
 def interpolate_short_missing(s, max_gap):
-    return s.interpolate(method="linear", limit=max_gap, limit_direction="forward")
-
-
-# Checks whether daily-derived context variables repeat one value across each day.
-def daily_consistency_report(df, cols):
-    report = {}
-    warnings_out = {}
-    dates = pd.to_datetime(df["date"]).dt.date
-    for c in cols:
-        if c not in df.columns:
-            continue
-        nunique = df.groupby(dates)[c].nunique(dropna=True)
-        multi_value_days = nunique[nunique > 1]
-        report[c] = {
-            "days_checked": int(nunique.shape[0]),
-            "days_with_single_repeated_value": int((nunique <= 1).sum()),
-            "days_with_multiple_values": int(multi_value_days.shape[0]),
-            "usually_one_repeated_value_per_day": bool((multi_value_days.shape[0] / max(1, nunique.shape[0])) <= 0.10),
-        }
-        if not multi_value_days.empty:
-            warnings_out[c] = [str(day) for day in multi_value_days.index[:50]]
-    return report, warnings_out
+    return s.interpolate(method="linear", limit=max_gap, limit_direction="both")
 
 
 # Treats short zero runs as missing but preserves long zero runs as real shutdowns.
@@ -370,8 +349,6 @@ def main():
     elev_cols = [c for c in df.columns if c.startswith("elev_agus")]
     rain_cols = [c for c in df.columns if c == "rainfall"]
     outflow_cols = [c for c in df.columns if "outflow" in c]
-    hydrologic_daily_cols = rain_cols + outflow_cols
-    hydro_consistency, hydro_warnings = daily_consistency_report(df, hydrologic_daily_cols)
 
     print("Generation unit cols:", len(gen_unit_cols))
     print("Outage unit cols:", len(out_unit_cols))
@@ -410,33 +387,14 @@ def main():
         )
         df[c] = s
 
-    # Cleans forebay elevation using physical validity rules before final imputation.
-    forebay_cleaning_report = {}
-    for c in elev_cols:
-        s = df[c].astype(float).copy()
-        invalid_mask = s.le(0) & s.notna()
-        flag_col = f"{c}_invalid_zero_or_negative_flag"
-        df[flag_col] = invalid_mask.astype(int)
-        forebay_cleaning_report[c] = {
-            "invalid_zero_or_negative_replaced": int(invalid_mask.sum()),
-            "rule": "Zero or negative forebay elevation values are physically invalid and were replaced with missing values before short-gap interpolation/imputation.",
-        }
-        s = s.mask(invalid_mask, np.nan)
-        s = smooth_spikes(s, CONFIG["spike_factor"])
-        s = interpolate_short_missing(s, CONFIG["short_missing_gap_max"])
-        df[c] = s
-
-    # Cleans rainfall and outflow as daily-derived hourly-equivalent context variables.
-    for c in rain_cols + outflow_cols:
+    # Cleans elevation, rainfall, and outflow series before final imputation.
+    for c in elev_cols + rain_cols + outflow_cols:
         s = df[c].astype(float).copy()
         if c in rain_cols:
             s = s.mask(s < 0, 0.0)
         s = smooth_spikes(s, CONFIG["spike_factor"])
         s = interpolate_short_missing(s, CONFIG["short_missing_gap_max"])
         df[c] = s
-
-    for c in hydrologic_daily_cols:
-        df[f"{c}_daily_derived_hourly_equivalent_flag"] = 1
 
     num_cols = [c for c in df.columns if c not in ["date", "time", "datetime"]]
 
@@ -515,8 +473,6 @@ def main():
     keep_cols += [c for c in dfh.columns if c.startswith("tot_agus")]
     keep_cols += [c for c in dfh.columns if c.startswith("elev_agus")]
     keep_cols += [c for c in dfh.columns if c == "rainfall" or "outflow" in c]
-    keep_cols += [c for c in dfh.columns if c.endswith("_daily_derived_hourly_equivalent_flag")]
-    keep_cols += [c for c in dfh.columns if c.endswith("_invalid_zero_or_negative_flag")]
 
     keep_cols = list(dict.fromkeys([c for c in keep_cols if c in dfh.columns]))
     clean_df = dfh[keep_cols].copy()
@@ -539,26 +495,6 @@ def main():
                 "rows": int(len(cleaned_output_df)),
                 "columns": list(cleaned_output_df.columns),
                 "note": "Saved cleaned files omit datetime; downstream scripts rebuild it from date and time.",
-                "hydrologic_context_variables": {
-                    "columns": hydrologic_daily_cols,
-                    "source_treatment": "Rainfall and Lake Lanao outflow are hourly-equivalent values derived from daily records.",
-                    "second_division_by_24_applied": False,
-                    "usage_limitation": "These variables are hydrologic context features, not true hourly sensor measurements.",
-                    "daily_derived_flag_columns": [f"{c}_daily_derived_hourly_equivalent_flag" for c in hydrologic_daily_cols],
-                    "daily_consistency_check": hydro_consistency,
-                    "warnings_days_with_multiple_values": hydro_warnings,
-                },
-                "forebay_elevation_cleaning": {
-                    "columns": elev_cols,
-                    "invalid_value_rule": "Zero or negative forebay elevation is invalid in this dataset and was replaced with missing values before careful interpolation/imputation.",
-                    "invalid_flag_columns": [f"{c}_invalid_zero_or_negative_flag" for c in elev_cols],
-                    "report": forebay_cleaning_report,
-                },
-                "generation_zero_rule": {
-                    "rule": "The forebay zero/negative invalid-value rule was not applied to generation. Generation zero runs are preserved when they indicate possible real shutdown or outage conditions.",
-                    "short_zero_run_max_interpolated": CONFIG["short_zero_run_max"],
-                    "long_zero_run_min_preserved": CONFIG["long_zero_run_min"],
-                },
             },
             f,
             indent=2
