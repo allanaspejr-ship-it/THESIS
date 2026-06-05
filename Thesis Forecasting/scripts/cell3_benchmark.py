@@ -53,6 +53,7 @@ for folder in [CLEANED_DATA_DIR, OUTAGES_DIR, *BENCHMARK_OUTPUT_DIRS.values(), *
 
 # Stores plant capacities, output schemas, feature windows, and benchmark model keys.
 PLANTS = ["agus1", "agus2", "agus4", "agus5", "agus6", "agus7"]
+UPSTREAM_MAP = {"agus1": None, "agus2": "agus1", "agus4": "agus2", "agus5": "agus4", "agus6": "agus5", "agus7": "agus6"}
 METRICS_COLUMNS = [
     "model",
     "plant",
@@ -125,6 +126,23 @@ def metrics(y_true, y_pred, plant):
     }
 
 
+def leakage_feature_audit(feature_columns):
+    forbidden_patterns = [r"_tplus1$", r"_delta_tplus1$", r"actual", r"predicted", r"forecast", r"testing", r"validation"]
+    forbidden = [
+        col for col in feature_columns
+        if any(re.search(pattern, col, flags=re.IGNORECASE) for pattern in forbidden_patterns)
+    ]
+    return "PASS" if not forbidden else "FAIL"
+
+
+def level_from_delta(current, delta_pred, plant):
+    return np.clip(
+        np.asarray(current, dtype=float) + np.asarray(delta_pred, dtype=float),
+        0.0,
+        CAPACITY_MW[plant] * 1.05,
+    )
+
+
 # Formats Excel outputs for easier review and thesis reporting.
 def format_excel(path):
     try:
@@ -141,6 +159,24 @@ def format_excel(path):
             max_len = max([len(header)] + [len(str(cell.value)) for cell in column_cells[1:80] if cell.value is not None])
             ws.column_dimensions[column_cells[0].column_letter].width = min(max(max_len + 2, 10), 34)
     wb.save(path)
+
+
+def save_benchmark_fairness_audit(rows):
+    path = META_DIR / "benchmark_fairness_audit.xlsx"
+    columns = [
+        "model",
+        "plant",
+        "feature count",
+        "target type",
+        "split strategy",
+        "operational MAPE definition",
+        "feature set alignment",
+        "leakage check",
+        "benchmark role",
+    ]
+    pd.DataFrame(rows)[columns].to_excel(path, index=False)
+    format_excel(path)
+    print("Saved:", path)
 
 
 # Rebuilds the hourly datetime column from public date and time fields.
@@ -247,7 +283,7 @@ def train_benchmark_model(name, plant, train, x_cols, y_col):
     return model_payload(model, model_feature_columns)
 
 
-# Predicts with saved feature alignment and clips outputs to plant capacity bounds.
+# Predicts residual/delta output with saved feature alignment.
 def predict_aligned(model_info, X, plant):
     model, model_feature_columns = unpack_model_payload(model_info)
     if not model_feature_columns:
@@ -255,26 +291,38 @@ def predict_aligned(model_info, X, plant):
     if set(X.columns) != set(model_feature_columns):
         print("WARNING: Feature mismatch detected. Aligning features or retraining model.")
     X_input = align_features(X.copy(), model_feature_columns)
-    return np.clip(model.predict(X_input), 0.0, CAPACITY_MW[plant] * 1.05)
+    return model.predict(X_input)
 
 
 # ============================================================
 # FEATURE ENGINEERING AND CHRONOLOGICAL SPLITTING
 # ============================================================
 
-# Builds time, lag, rolling, unit-share, and outage features for benchmark models.
+# Builds time, lag, rolling, unit-share, outage, hydrologic, and upstream features aligned with RBFNN.
 def add_features(df):
     out = df.copy()
     out["datetime"] = pd.to_datetime(out["datetime"])
     hour0 = out["time"].astype(int) - 1
+    dt = out["datetime"]
     out["hour_sin"] = np.sin(2 * np.pi * hour0 / 24)
     out["hour_cos"] = np.cos(2 * np.pi * hour0 / 24)
-    out["day_of_week"] = out["datetime"].dt.dayofweek
-    out["month"] = out["datetime"].dt.month
+    out["day_sin"] = np.sin(2 * np.pi * dt.dt.dayofweek / 7)
+    out["day_cos"] = np.cos(2 * np.pi * dt.dt.dayofweek / 7)
+    out["month_sin"] = np.sin(2 * np.pi * dt.dt.month / 12)
+    out["month_cos"] = np.cos(2 * np.pi * dt.dt.month / 12)
+    out["is_weekend"] = (dt.dt.dayofweek >= 5).astype(int)
+    target_dt = dt + pd.Timedelta(hours=1)
+    target_hour0 = target_dt.dt.hour
+    out["target_hour_sin"] = np.sin(2 * np.pi * target_hour0 / 24)
+    out["target_hour_cos"] = np.cos(2 * np.pi * target_hour0 / 24)
+    out["target_day_sin"] = np.sin(2 * np.pi * target_dt.dt.dayofweek / 7)
+    out["target_day_cos"] = np.cos(2 * np.pi * target_dt.dt.dayofweek / 7)
+    out["target_is_weekend"] = (target_dt.dt.dayofweek >= 5).astype(int)
 
     for plant in PLANTS:
         target = f"total_gen_{plant}"
         out[f"{target}_tplus1"] = out[target].shift(-1)
+        out[f"{target}_delta_tplus1"] = out[f"{target}_tplus1"] - out[target]
         out[f"{target}_current"] = out[target]
         for lag in LAGS:
             out[f"{target}_lag{lag}"] = out[target].shift(lag)
@@ -282,6 +330,13 @@ def add_features(df):
             roll = out[target].rolling(window, min_periods=max(2, window // 2))
             out[f"{target}_rollmean{window}"] = roll.mean()
             out[f"{target}_rollstd{window}"] = roll.std().fillna(0.0)
+            out[f"{target}_rollmin{window}"] = roll.min()
+            out[f"{target}_rollmax{window}"] = roll.max()
+        out[f"{target}_diff1"] = out[target].diff(1)
+        out[f"{target}_diff3"] = out[target].diff(3)
+        out[f"{target}_diff24"] = out[target].diff(24)
+        out[f"{target}_target_lag24"] = out[target].shift(23)
+        out[f"{target}_target_lag168"] = out[target].shift(167)
         unit_gen_cols = [c for c in out.columns if re.fullmatch(fr"gen_{plant}_unit\d+", c)]
         for unit_col in unit_gen_cols:
             out[f"{unit_col}_current"] = out[unit_col]
@@ -293,20 +348,48 @@ def add_features(df):
         out_cols = [c for c in out.columns if re.fullmatch(fr"out_{plant}_unit\d+", c)]
         if out_cols:
             out[f"{plant}_units_running"] = out[out_cols].sum(axis=1)
+            out[f"{plant}_plant_available"] = (out[f"{plant}_units_running"] > 0).astype(int)
+    for plant, upstream in UPSTREAM_MAP.items():
+        if upstream is None:
+            continue
+        up_target = f"total_gen_{upstream}"
+        out[f"{plant}_upstream_current"] = out[up_target]
+        for lag in LAGS:
+            out[f"{plant}_upstream_gen_lag{lag}"] = out[up_target].shift(lag)
+    for col in [c for c in out.columns if c.startswith("tot_agus") or c.startswith("elev_agus") or "outflow" in c or c == "rainfall"]:
+        for lag in [1, 3, 6, 12, 24]:
+            out[f"{col}_lag{lag}"] = out[col].shift(lag)
     return out
 
 
 # Selects the benchmark feature columns for one plant.
 def feature_cols(df, plant):
     target = f"total_gen_{plant}"
-    cols = ["hour_sin", "hour_cos", "day_of_week", "month", f"{target}_current"]
-    cols += [c for c in df.columns if c.startswith(f"{target}_lag") or c.startswith(f"{target}_roll")]
+    cols = [
+        "hour_sin",
+        "hour_cos",
+        "day_sin",
+        "day_cos",
+        "month_sin",
+        "month_cos",
+        "is_weekend",
+        "target_hour_sin",
+        "target_hour_cos",
+        "target_day_sin",
+        "target_day_cos",
+        "target_is_weekend",
+        f"{target}_current",
+    ]
+    prefixes = [f"{target}_lag", f"{target}_roll", f"{target}_diff", f"{target}_target_", f"{plant}_upstream_"]
+    cols += [c for c in df.columns if any(c.startswith(prefix) for prefix in prefixes)]
     cols += [
         c for c in df.columns
         if re.fullmatch(fr"gen_{plant}_unit\d+_(current|lag\d+|share_current|share_lag\d+)", c)
     ]
     cols += [c for c in df.columns if re.fullmatch(fr"out_{plant}_unit\d+", c)]
-    cols += [f"{plant}_units_running"]
+    cols += [f"{plant}_units_running", f"{plant}_plant_available"]
+    cols += [c for c in df.columns if c.startswith(f"tot_{plant}") or c.startswith(f"elev_{plant}") or c.startswith(f"spill_{plant}")]
+    cols += [c for c in df.columns if "_lag" in c and (c.startswith("tot_agus") or c.startswith("elev_agus") or "outflow" in c or c.startswith("rainfall"))]
     return [c for c in dict.fromkeys(cols) if c in df.columns]
 
 
@@ -577,8 +660,16 @@ def feature_row_from_history(hist, plant, date_val, hour_val, model_features=Non
     row.update({
         "hour_sin": np.sin(2 * np.pi * hour0 / 24),
         "hour_cos": np.cos(2 * np.pi * hour0 / 24),
-        "day_of_week": dt.dayofweek,
-        "month": dt.month,
+        "day_sin": np.sin(2 * np.pi * dt.dayofweek / 7),
+        "day_cos": np.cos(2 * np.pi * dt.dayofweek / 7),
+        "month_sin": np.sin(2 * np.pi * dt.month / 12),
+        "month_cos": np.cos(2 * np.pi * dt.month / 12),
+        "is_weekend": int(dt.dayofweek >= 5),
+        "target_hour_sin": np.sin(2 * np.pi * hour0 / 24),
+        "target_hour_cos": np.cos(2 * np.pi * hour0 / 24),
+        "target_day_sin": np.sin(2 * np.pi * dt.dayofweek / 7),
+        "target_day_cos": np.cos(2 * np.pi * dt.dayofweek / 7),
+        "target_is_weekend": int(dt.dayofweek >= 5),
     })
     return pd.DataFrame([{c: row.get(c, 0.0) if pd.notna(row.get(c, 0.0)) else 0.0 for c in x_cols}])
 
@@ -603,8 +694,9 @@ def forecast_benchmark_24h(raw_df, planned, models_by_plant):
             x_row = feature_row_from_history(hist, plant, date_i, hour_i, model_features)
             if model_features:
                 x_row = align_features(x_row, model_features)
-            pred = float(model.predict(x_row)[0])
+            delta = float(model.predict(x_row)[0])
             last_val = float(hist[target].iloc[-1])
+            pred = last_val + delta
             diffs = hist[target].diff().abs().dropna()
             limit = float(max(1.0, diffs.quantile(0.98))) if not diffs.empty else 2.0
             pred = float(np.clip(pred, last_val - limit, last_val + limit))
@@ -682,7 +774,7 @@ def load_or_train_benchmark_models(raw_df):
 
     for plant in PLANTS:
         target = f"total_gen_{plant}"
-        y_col = f"{target}_tplus1"
+        y_col = f"{target}_delta_tplus1"
         x_cols = feature_cols(df, plant)
         work = df.dropna(subset=[y_col] + x_cols).copy()
         train, _, _ = split(work)
@@ -714,10 +806,11 @@ def save_saved_model_metrics_and_predictions(raw_df, forecast_models):
     df = add_features(raw_df)
     rows = []
     prediction_rows = {"Random Forest": [], "XGBoost": []}
+    fairness_rows = []
 
     for plant in PLANTS:
         target = f"total_gen_{plant}"
-        y_col = f"{target}_tplus1"
+        y_col = f"{target}_delta_tplus1"
         x_cols = feature_cols(df, plant)
         work = df.dropna(subset=[y_col] + x_cols).copy()
         _, val, test = split(work)
@@ -725,14 +818,20 @@ def save_saved_model_metrics_and_predictions(raw_df, forecast_models):
         for name, models_by_plant in forecast_models.items():
             model_info = models_by_plant[plant]
             _, model_feature_columns = unpack_model_payload(model_info)
-            val_pred = predict_aligned(model_info, val[x_cols].copy(), plant)
-            test_pred = predict_aligned(model_info, test[x_cols].copy(), plant)
-            val_m = metrics(val[y_col], val_pred, plant)
-            test_m = metrics(test[y_col], test_pred, plant)
+            feature_count = len(model_feature_columns or x_cols)
+            leakage_check = leakage_feature_audit(model_feature_columns or x_cols)
+            val_delta_pred = predict_aligned(model_info, val[x_cols].copy(), plant)
+            test_delta_pred = predict_aligned(model_info, test[x_cols].copy(), plant)
+            val_pred = level_from_delta(val[target], val_delta_pred, plant)
+            test_pred = level_from_delta(test[target], test_delta_pred, plant)
+            val_actual = val[f"{target}_tplus1"].values.astype(float)
+            test_actual = test[f"{target}_tplus1"].values.astype(float)
+            val_m = metrics(val_actual, val_pred, plant)
+            test_m = metrics(test_actual, test_pred, plant)
             rows.append({
                 "model": name,
                 "plant": plant,
-                "feature_count": len(model_feature_columns or x_cols),
+                "feature_count": feature_count,
                 "val_operational_mape": val_m["operational_mape"],
                 "val_mae": val_m["mae"],
                 "val_rmse": val_m["rmse"],
@@ -742,9 +841,20 @@ def save_saved_model_metrics_and_predictions(raw_df, forecast_models):
                 "test_rmse": test_m["rmse"],
                 "test_r2": test_m["r2"],
             })
+            fairness_rows.append({
+                "model": name,
+                "plant": plant,
+                "feature count": feature_count,
+                "target type": "residual/delta target reconstructed to generation level",
+                "split strategy": "chronological 70/15/15",
+                "operational MAPE definition": "same as RBFNN: excludes near-zero actual generation below plant operational threshold",
+                "feature set alignment": "aligned with RBFNN feature families: time, lag, rolling, unit-share, outage, hydrologic context, and upstream cascade features",
+                "leakage check": leakage_check,
+                "benchmark role": "comparison benchmark only; RBFNN remains the primary model",
+            })
 
             test_datetimes = pd.to_datetime(test["datetime"]) + pd.Timedelta(hours=1)
-            for dt_val, actual, predicted in zip(test_datetimes, test[y_col], test_pred):
+            for dt_val, actual, predicted in zip(test_datetimes, test_actual, test_pred):
                 prediction_rows[name].append({
                     "Date": dt_val.date(),
                     "Hour": int(dt_val.hour) + 1,
@@ -766,6 +876,7 @@ def save_saved_model_metrics_and_predictions(raw_df, forecast_models):
         format_excel(predictions_path)
         print("Saved:", metrics_path)
         print("Saved:", predictions_path)
+    save_benchmark_fairness_audit(fairness_rows)
 
 
 # Uses saved or retrained benchmark models to evaluate metrics and forecast 24 hours.
@@ -790,10 +901,11 @@ def run_training_and_forecast():
     rows = []
     testing_prediction_rows = {"Random Forest": [], "XGBoost": []}
     forecast_models = {"Random Forest": {}, "XGBoost": {}}
+    fairness_rows = []
 
     for plant in PLANTS:
         target = f"total_gen_{plant}"
-        y_col = f"{target}_tplus1"
+        y_col = f"{target}_delta_tplus1"
         x_cols = feature_cols(df, plant)
         work = df.dropna(subset=[y_col] + x_cols).copy()
         train, val, test = split(work)
@@ -802,10 +914,15 @@ def run_training_and_forecast():
             # --- Model training and validation/testing evaluation ---
             model_info = train_benchmark_model(name, plant, train, x_cols, y_col)
             _, model_feature_columns = unpack_model_payload(model_info)
-            val_pred = predict_aligned(model_info, val[x_cols].copy(), plant)
-            test_pred = predict_aligned(model_info, test[x_cols].copy(), plant)
-            val_m = metrics(val[y_col], val_pred, plant)
-            test_m = metrics(test[y_col], test_pred, plant)
+            leakage_check = leakage_feature_audit(model_feature_columns)
+            val_delta_pred = predict_aligned(model_info, val[x_cols].copy(), plant)
+            test_delta_pred = predict_aligned(model_info, test[x_cols].copy(), plant)
+            val_pred = level_from_delta(val[target], val_delta_pred, plant)
+            test_pred = level_from_delta(test[target], test_delta_pred, plant)
+            val_actual = val[f"{target}_tplus1"].values.astype(float)
+            test_actual = test[f"{target}_tplus1"].values.astype(float)
+            val_m = metrics(val_actual, val_pred, plant)
+            test_m = metrics(test_actual, test_pred, plant)
             rows.append({
                 "model": name,
                 "plant": plant,
@@ -819,8 +936,19 @@ def run_training_and_forecast():
                 "test_rmse": test_m["rmse"],
                 "test_r2": test_m["r2"],
             })
+            fairness_rows.append({
+                "model": name,
+                "plant": plant,
+                "feature count": len(model_feature_columns),
+                "target type": "residual/delta target reconstructed to generation level",
+                "split strategy": "chronological 70/15/15",
+                "operational MAPE definition": "same as RBFNN: excludes near-zero actual generation below plant operational threshold",
+                "feature set alignment": "aligned with RBFNN feature families: time, lag, rolling, unit-share, outage, hydrologic context, and upstream cascade features",
+                "leakage check": leakage_check,
+                "benchmark role": "comparison benchmark only; RBFNN remains the primary model",
+            })
             test_datetimes = pd.to_datetime(test["datetime"]) + pd.Timedelta(hours=1)
-            for dt_val, actual, predicted in zip(test_datetimes, test[y_col], test_pred):
+            for dt_val, actual, predicted in zip(test_datetimes, test_actual, test_pred):
                 testing_prediction_rows[name].append({
                     "Date": dt_val.date(),
                     "Hour": int(dt_val.hour) + 1,
@@ -839,6 +967,7 @@ def run_training_and_forecast():
     result[result["model"] == "XGBoost"].to_excel(xgb_metrics_path, index=False)
     format_excel(rf_metrics_path)
     format_excel(xgb_metrics_path)
+    save_benchmark_fairness_audit(fairness_rows)
 
     for name, prediction_rows in testing_prediction_rows.items():
         model_key = name.lower().replace(" ", "_")

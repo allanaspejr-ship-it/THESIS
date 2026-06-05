@@ -52,6 +52,7 @@ RBFNN_FORECAST_DIR = OUT_DIR / "rbfnn_forecast"
 MODEL_DIR = OPT_DIR / "models" / "rbfnn"
 LEGACY_MODEL_DIR = LEGACY_OPT_DIR / "models" / "rbfnn"
 META_DIR = OPT_DIR / "metadata"
+RBFNN_META_DIR = META_DIR / "rbfnn"
 VALIDATION_METRICS_DIR = META_DIR / "validation_metrics"
 TESTING_METRICS_DIR = META_DIR / "testing_metrics"
 OVERALL_METRICS_DIR = META_DIR / "overall_metrics"
@@ -64,6 +65,7 @@ for folder in [
     OUTAGES_DIR,
     RBFNN_FORECAST_DIR,
     MODEL_DIR,
+    RBFNN_META_DIR,
     VALIDATION_METRICS_DIR,
     TESTING_METRICS_DIR,
     OVERALL_METRICS_DIR,
@@ -178,6 +180,70 @@ def format_excel(path):
             max_len = max([len(header)] + [len(str(cell.value)) for cell in column_cells[1:80] if cell.value is not None])
             ws.column_dimensions[column_cells[0].column_letter].width = min(max(max_len + 2, 10), 34)
     wb.save(path)
+
+
+def leakage_feature_audit(feature_columns, plant):
+    forbidden_patterns = [
+        r"_tplus1$",
+        r"_delta_tplus1$",
+        r"actual",
+        r"predicted",
+        r"forecast",
+        r"testing",
+        r"validation",
+    ]
+    forbidden = [
+        col for col in feature_columns
+        if any(re.search(pattern, col, flags=re.IGNORECASE) for pattern in forbidden_patterns)
+    ]
+    return {
+        "plant": plant,
+        "feature_count": int(len(feature_columns)),
+        "leakage_check": "PASS" if not forbidden else "FAIL",
+        "forbidden_feature_columns": forbidden,
+    }
+
+
+def save_leakage_audit(per_plant_results):
+    audit_path = META_DIR / "leakage_audit.json"
+    overall_pass = all(item["leakage_check"] == "PASS" for item in per_plant_results)
+    audit = {
+        "split_strategy": "chronological 70/15/15",
+        "scaler_fitting": "training set only",
+        "model_training": "training set only",
+        "calibration_selection": "validation set only",
+        "testing_use": "final evaluation only",
+        "feature_leakage_check": "PASS" if overall_pass else "FAIL",
+        "day_ahead_mode": "recursive 24-hour forecasting",
+        "future_data_used": False,
+        "recursive_forecast_note": "Each forecast hour is appended to the history before building features for the next forecast hour.",
+        "planned_outage_inputs": "planned outage status is read from the 24-hour outage template known before the forecast day",
+        "per_plant_feature_audit_results": per_plant_results,
+    }
+    audit_path.write_text(json.dumps(audit, indent=2))
+    print("Saved:", audit_path)
+
+
+def save_rbfnn_calibration_report(rows):
+    report_path = RBFNN_META_DIR / "rbfnn_calibration_report.xlsx"
+    columns = [
+        "plant",
+        "feature_count",
+        "selected centers",
+        "selected learning rate",
+        "selected shrinkage",
+        "bias correction",
+        "bin calibration used",
+        "hourly residual correction used",
+        "profile blending used",
+        "ramp limit used",
+        "capacity/outage adjustment used",
+        "derived from",
+        "testing used for calibration",
+    ]
+    pd.DataFrame(rows)[columns].to_excel(report_path, index=False)
+    format_excel(report_path)
+    print("Saved:", report_path)
 
 
 # Saves epoch-by-epoch training and validation loss history.
@@ -1295,6 +1361,8 @@ def run_training_and_forecast():
     feat_df = add_features(raw_df)
     summary_rows = []
     testing_prediction_rows = []
+    leakage_audit_rows = []
+    calibration_report_rows = []
 
     for plant in PLANTS:
         if selected_plants and plant not in selected_plants:
@@ -1303,6 +1371,7 @@ def run_training_and_forecast():
         target = f"total_gen_{plant}"
         y_col = f"{target}_delta_tplus1"
         x_cols = feature_columns_for(feat_df, plant)
+        leakage_audit_rows.append(leakage_feature_audit(x_cols, plant))
         data = feat_df.dropna(subset=[y_col] + x_cols).copy()
         train_df, val_df, test_df = chronological_split(data)
 
@@ -1427,8 +1496,26 @@ def run_training_and_forecast():
             "selected_centers": best["n_centers"],
             "selected_learning_rate": best["learning_rate"],
             "selection_metric": "lowest validation operational MAPE, with Agus 5/7 post-calibrated for hourly residual and same-hour-yesterday shape tracking",
+            "derived_from": "validation set only",
+            "testing_used_for_calibration": "No",
             "model_type": "RBFNN residual/delta model anchored to persistence",
         }, indent=2))
+
+        calibration_report_rows.append({
+            "plant": plant,
+            "feature_count": len(x_cols),
+            "selected centers": best["n_centers"],
+            "selected learning rate": best["learning_rate"],
+            "selected shrinkage": shrinkage,
+            "bias correction": bias,
+            "bin calibration used": "Yes" if bin_calibration else "No",
+            "hourly residual correction used": "Yes" if hourly_correction else "No",
+            "profile blending used": "Yes" if profile_blend else "No",
+            "ramp limit used": limit,
+            "capacity/outage adjustment used": "Yes",
+            "derived from": "validation set only",
+            "testing used for calibration": "No",
+        })
 
         save_daily_metrics(val_df, val_actual, val_pred, plant, VALIDATION_METRICS_DIR / f"{plant}_validation_daily_metrics.xlsx")
         save_daily_metrics(test_df, test_actual, test_pred, plant, TESTING_METRICS_DIR / f"{plant}_testing_daily_metrics.xlsx")
@@ -1436,6 +1523,8 @@ def run_training_and_forecast():
         print(pd.DataFrame([row]).to_string(index=False))
 
     summary = pd.DataFrame(summary_rows)[METRICS_COLUMNS]
+    save_leakage_audit(leakage_audit_rows)
+    save_rbfnn_calibration_report(calibration_report_rows)
     summary_path = OVERALL_METRICS_DIR / "rbfnn_validation_testing_metrics.xlsx"
     if selected_plants and summary_path.exists():
         existing_summary = pd.read_excel(summary_path)

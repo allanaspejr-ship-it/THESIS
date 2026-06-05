@@ -652,8 +652,8 @@ def render_header(last_updated: str | None = None) -> None:
         f"""
         <div class="dashboard-header">
             <div>
-                <h1 class="page-title">NPC Agus Cascade Hydropower Generation Forecasting Dashboard</h1>
-                <p class="page-subtitle">RBFNN-Based Day-Ahead Forecasting and Planned Outage Management</p>
+                <h1 class="page-title">NPC Agus Cascade Hydropower Decision-Support Dashboard</h1>
+                <p class="page-subtitle">Outage-Aware Forecasting Prototype for Historical Testing-Based Day-Ahead Forecasts</p>
             </div>
             <div class="header-update">
                 Last updated
@@ -1345,8 +1345,8 @@ def system_information_page() -> None:
 
 
 def render_sidebar() -> str:
-    st.markdown('<div class="sidebar-title">NPC Agus Operations</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sidebar-subtitle">RBFNN Forecasting Control Panel</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sidebar-title">NPC Agus Decision Support</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sidebar-subtitle">RBFNN Forecasting Prototype Panel</div>', unsafe_allow_html=True)
     selected_page = st.radio("Navigation", NAV_ITEMS, label_visibility="collapsed")
     st.markdown(
         f"""

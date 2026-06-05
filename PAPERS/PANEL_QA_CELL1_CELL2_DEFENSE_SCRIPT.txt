@@ -737,6 +737,459 @@ A. Adam does not optimize hyperparameters such as the learning rate, number of R
 Q152. What are the strengths and weaknesses of your thesis, and how can the weaknesses be addressed?
 A. The strengths of the thesis are that it uses real Agus cascade hourly generation data, applies a complete cleaning and preprocessing workflow, considers planned unit outages, uses a cascade-aware and hydrology-aware RBFNN feature set, evaluates the model using chronological validation and testing data, compares the RBFNN against Random Forest and XGBoost benchmarks, and produces a practical 24-hour day-ahead forecast at unit, plant, and cascade level. The main weaknesses are that the model depends on the quality and availability of historical records, the forecast horizon is limited to short-term day-ahead forecasting, the planned outage file must be accurately updated by the user, and the model was tested on historical data from one cascade system only. These weaknesses can be addressed by continuously updating the dataset, adding more years of data, validating the system on future unseen operating periods, improving outage input integration, testing the method on other hydroelectric systems, and adding more real-time hydrologic or operational variables if available.
 
+Q153. What hyperparameters were used in the main RBFNN model, what is their goal, why are they important, and how did you find the best fit?
+A. The main RBFNN hyperparameters were the number of RBF centers, learning rate, epochs, batch size, and shrinkage factor. The search used RBF centers of 80, 120, and 180; learning rates of 0.001 and 0.0005; 80 epochs; batch size of 32; and shrinkage values from 0.05 to 1.15. The goal of these hyperparameters is to control model complexity, training stability, and forecast correction. The number of RBF centers controls how many radial basis patterns the model can learn. The learning rate controls how fast Adam updates the trainable weights, centers, and gamma values. Epochs and batch size control the training process. Shrinkage controls how strongly the predicted residual change is applied to the final forecast. These are important because poor settings can cause underfitting, overfitting, unstable forecasts, or unrealistic jumps. The best fit was selected using validation performance from the chronological validation set. The model tested combinations of RBF centers and learning rates, then applied shrinkage and bias correction, and selected the configuration with the best validation operational MAPE before evaluating on the unseen testing set.
+
+Q154. What does the Adam optimizer do in the code?
+A. In the code, Adam is used to train the RBFNN by minimizing the mean squared error loss. It updates the trainable RBF centers, gamma values, output weights, and output bias. Adam is useful because it uses adaptive learning rates, so each parameter can be updated more efficiently depending on the gradient history. This helps the model converge faster and more stably during training.
+
+
+SECTION 7: FORMULAS USED IN THE THESIS
+
+Use this section when the panel asks, "What formulas did you use, how do they work, and what is their purpose?"
+
+Formula 1. Datetime reconstruction
+Formula:
+datetime = date + (time - 1) hours
+How it works:
+The source file uses Date and Time, where Time 1 means 00:00 and Time 24 means 23:00. The code subtracts 1 from the time value and adds that number of hours to the date.
+Purpose:
+This creates one chronological hourly timestamp so the dataset can be sorted, resampled, split, and forecasted correctly.
+
+Formula 2. Near-zero generation cleaning
+Formula:
+if generation <= 0.05 MW, generation = 0
+How it works:
+Any tiny generation value at or below 0.05 MW is treated as zero instead of real production.
+Purpose:
+This removes very small recording noise and prevents the model from learning false generation activity.
+
+Formula 3. Linear interpolation for short gaps
+Formula:
+x_t = x_before + ((t - t_before) / (t_after - t_before)) * (x_after - x_before)
+How it works:
+For short missing gaps, the missing value is estimated along a straight line between the nearest known values before and after the gap.
+Purpose:
+This fills small data gaps without discarding hourly records. In the code, short missing gaps are limited to 2 hours.
+
+Formula 4. Short zero-run treatment
+Formula:
+If a zero run length is 1 to 2 hours, treat it as missing and interpolate.
+If a zero run length is 3 hours or more, keep it as 0.
+How it works:
+The code counts consecutive zero values. Short zero runs are treated as possible recording issues, while long zero runs are treated as possible real shutdown or outage periods.
+Purpose:
+This avoids erasing true non-generation periods while still correcting likely short recording errors.
+
+Formula 5. Spike smoothing rule
+Formula:
+local_mean = (x_(t-1) + x_(t+1)) / 2
+local_diff = abs(x_(t-1) - x_(t+1)) + 0.000001
+if abs(x_t - local_mean) > 3.5 * max(local_diff, 1.0), then x_t = local_mean
+How it works:
+The value at time t is compared with the average of its previous and next values. If it is too far from its local neighbors, it is replaced by the local mean.
+Purpose:
+This reduces isolated abnormal spikes while preserving real operational changes.
+
+Formula 6. KNN imputation
+Formula:
+x_missing = weighted average of the 5 nearest similar rows
+How it works:
+Rows with missing numeric values are compared with other rows using their available feature patterns. The missing value is estimated from the nearest 5 rows, using distance-based weighting.
+Purpose:
+This fills remaining missing operational and hydrologic values using similar historical conditions instead of a simple mean.
+
+Formula 7. Total plant generation
+Formula:
+total_gen_plant = sum(unit_generation_i) for all units in the plant
+Example:
+total_gen_agus1 = gen_agus1_unit1 + gen_agus1_unit2
+How it works:
+After unit-level generation values are cleaned, the plant total is recalculated by summing the plant's unit generation columns.
+Purpose:
+This keeps plant-level generation consistent with cleaned unit-level data.
+
+Formula 8. Binary outage or availability indicator
+Formula:
+out_unit = 1 if unit is available or generation > 0
+out_unit = 0 if unit is unavailable or generation <= 0
+How it works:
+Outage/status columns are standardized into binary values. During cleaning, unit generation can also be used to infer running status.
+Purpose:
+This gives the model a clear unit-availability signal and allows the forecast to respect planned outages.
+
+Formula 9. Hourly resampling
+Formula:
+hourly_value = mean(values within the hour)
+For outage/status:
+out_unit = 1 if hourly mean >= 0.5, otherwise 0
+How it works:
+Numeric data are grouped by hourly timestamp and averaged. Binary outage values are converted back to 0 or 1 after averaging.
+Purpose:
+This makes all data match the hourly short-term forecasting horizon.
+
+Formula 10. Chronological data split
+Formula:
+training = first 70 percent of rows
+validation = next 15 percent of rows
+testing = final 15 percent of rows
+How it works:
+The dataset is not randomly shuffled. Earlier records train the model, the next period tunes it, and the last period tests it.
+Purpose:
+This prevents time-series data leakage and simulates real forecasting on future unseen data.
+
+Formula 11. Cyclical time encoding
+Formula:
+hour_sin = sin(2 * pi * hour / 24)
+hour_cos = cos(2 * pi * hour / 24)
+day_sin = sin(2 * pi * day_of_week / 7)
+day_cos = cos(2 * pi * day_of_week / 7)
+month_sin = sin(2 * pi * month / 12)
+month_cos = cos(2 * pi * month / 12)
+How it works:
+Time variables are converted into sine and cosine pairs so the model understands that cyclical endpoints are close to each other, such as 23:00 and 00:00.
+Purpose:
+This captures daily, weekly, and monthly patterns without creating artificial distance between adjacent cycle endpoints.
+
+Formula 12. Target-hour cyclical encoding
+Formula:
+target_datetime = datetime + 1 hour
+target_hour_sin = sin(2 * pi * target_hour / 24)
+target_hour_cos = cos(2 * pi * target_hour / 24)
+How it works:
+The model creates time features for the hour being predicted, not only the current hour.
+Purpose:
+This helps the model learn the expected behavior of the next hour.
+
+Formula 13. Lag features
+Formula:
+lag_k = generation_(t-k)
+where k = 1, 2, 3, 6, 12, 24, 48, 72, and 168 hours
+How it works:
+The model uses past generation values at selected lookback periods.
+Purpose:
+Lags capture recent behavior, daily repetition, and weekly repetition.
+
+Formula 14. Rolling mean
+Formula:
+rolling_mean_w(t) = average of generation values over the previous w-hour window
+How it works:
+For each time step, the model computes the average generation over windows such as 3, 6, 12, 24, 48, and 168 hours.
+Purpose:
+This tells the model the recent operating level or trend.
+
+Formula 15. Rolling standard deviation
+Formula:
+rolling_std_w(t) = sqrt(sum((x_i - mean_w)^2) / (n - 1))
+How it works:
+The model measures how variable the recent generation values are within each rolling window.
+Purpose:
+This helps the model distinguish stable operation from fluctuating operation.
+
+Formula 16. Rolling minimum and maximum
+Formula:
+rolling_min_w(t) = minimum generation in the previous w-hour window
+rolling_max_w(t) = maximum generation in the previous w-hour window
+How it works:
+The model records the recent lower and upper generation range.
+Purpose:
+This gives the model information about recent operating limits and variability.
+
+Formula 17. Difference features
+Formula:
+diff_k(t) = generation_t - generation_(t-k)
+where k = 1, 3, and 24 hours
+How it works:
+The current generation is compared with earlier generation values.
+Purpose:
+This helps the model detect ramping, drops, and daily change patterns.
+
+Formula 18. Same-hour historical target references
+Formula:
+target_lag24 = generation_(t-23)
+target_lag168 = generation_(t-167)
+How it works:
+Because the target is t+1, the same target hour yesterday is 23 rows behind the current row, and the same target hour last week is 167 rows behind.
+Purpose:
+This gives the model references for the same forecast hour from the previous day and previous week.
+
+Formula 19. Unit generation share
+Formula:
+unit_share_i = unit_generation_i / total_gen_plant
+How it works:
+Each unit's generation is divided by the total generation of its plant. If total generation is zero, the share is treated safely as zero.
+Purpose:
+This describes how plant output is distributed among available units.
+
+Formula 20. Number of running units
+Formula:
+units_running = sum(out_unit_i)
+How it works:
+The binary unit status values are added for each plant.
+Purpose:
+This tells the model how many units are available or running.
+
+Formula 21. Plant availability flag
+Formula:
+plant_available = 1 if units_running > 0, otherwise 0
+How it works:
+If at least one unit is available, the plant is marked available.
+Purpose:
+This gives a plant-level availability signal for forecasting and outage-aware adjustment.
+
+Formula 22. Upstream cascade feature
+Formula:
+upstream_current_plant = total_gen_upstream_plant(t)
+upstream_lag_k = total_gen_upstream_plant(t-k)
+How it works:
+Downstream plant models include current and lagged generation from the upstream plant in the cascade.
+Purpose:
+This represents hydraulic and operational dependency in the Agus cascade.
+
+Formula 23. Target residual or delta
+Formula:
+delta_(t+1) = total_gen_(t+1) - total_gen_t
+How it works:
+The model is trained to predict the next-hour change in generation instead of the full next-hour generation level.
+Purpose:
+This anchors the model to the current operating condition and makes short-term forecasts more stable.
+
+Formula 24. StandardScaler standardization
+Formula:
+z = (x - mean_training) / standard_deviation_training
+How it works:
+Each feature and target delta is centered and scaled using statistics from the training data.
+Purpose:
+This puts variables with different units, such as MW, elevation, rainfall, gates, and outflow, on comparable scales for neural network training.
+
+Formula 25. KMeans center initialization
+Formula:
+minimize sum over clusters of sum over points in cluster ||x_i - center_j||^2
+How it works:
+KMeans groups the scaled training feature vectors into clusters. The cluster centers initialize the RBFNN centers.
+Purpose:
+This gives the RBF layer representative starting patterns from the real training data instead of random centers only.
+
+Formula 26. RBF neuron distance
+Formula:
+d_j^2 = sum((x_i - c_ji)^2) over all input features i
+How it works:
+For each RBF center j, the model computes the squared Euclidean distance between the input feature vector and that center.
+Purpose:
+This measures how close the current operating condition is to a learned operating pattern.
+
+Formula 27. Gaussian radial basis activation
+Formula:
+phi_j(x) = exp(-gamma_j * d_j^2)
+How it works:
+If the input is close to center j, the distance is small and activation is high. If the input is far from the center, activation becomes low.
+Purpose:
+This lets the model learn local nonlinear relationships in generation behavior.
+
+Formula 28. Trainable gamma
+Formula:
+gamma_j = exp(log_gamma_j)
+How it works:
+The model stores log_gamma as a trainable value and exponentiates it so gamma stays positive.
+Purpose:
+Gamma controls the width or sensitivity of each RBF neuron.
+
+Formula 29. RBFNN output layer
+Formula:
+predicted_delta = b + sum(w_j * phi_j(x)) for all RBF neurons j
+How it works:
+The dense output layer combines all RBF activations using learned weights and bias.
+Purpose:
+This produces one predicted next-hour generation change for each plant-specific model.
+
+Formula 30. Mean Squared Error training loss
+Formula:
+MSE = (1/n) * sum((y_i - yhat_i)^2)
+How it works:
+During training, the model compares the true scaled delta with the predicted scaled delta and squares the error.
+Purpose:
+This is the loss minimized by Adam. Squaring gives stronger penalty to larger errors.
+
+Formula 31. Adam optimizer parameter update
+Formula:
+theta_new = theta_old - learning_rate * adaptive_gradient_step
+How it works:
+Adam updates the trainable RBF centers, gamma values, output weights, and output bias using adaptive estimates of gradient direction and size.
+Purpose:
+This trains the neural network to reduce MSE efficiently and stably.
+
+Formula 32. Persistence-anchored level forecast
+Formula:
+forecast_raw = current_generation + shrinkage * predicted_delta
+How it works:
+The forecast starts from the current generation and adds the model-predicted change multiplied by the validation-selected shrinkage factor.
+Purpose:
+This converts the residual prediction back into MW generation while controlling how strongly the model reacts.
+
+Formula 33. Bias correction
+Formula:
+bias = median(actual_generation - forecast_raw)
+forecast_bias_corrected = forecast_raw + bias
+How it works:
+The median validation residual is added to the forecast. The bias is clipped so it cannot become unrealistically large.
+Purpose:
+This corrects systematic underprediction or overprediction observed during validation.
+
+Formula 34. Forecast clipping by plant capacity
+Formula:
+forecast = min(max(forecast, 0), 1.05 * plant_capacity)
+How it works:
+Any negative forecast is raised to zero, and any forecast above 105 percent of plant capacity is limited.
+Purpose:
+This prevents physically unrealistic generation values during evaluation and forecasting.
+
+Formula 35. Bin calibration
+Formula:
+bin_error = median(actual - predicted) within each generation bin
+forecast_calibrated = forecast + scale * bin_error
+How it works:
+Validation records are grouped into quantile bins based on either current generation or base prediction. Each bin learns a median correction.
+Purpose:
+This corrects generation-range-specific bias, especially when the model is consistently high or low in a certain operating range.
+
+Formula 36. Hourly residual correction
+Formula:
+hour_error_h = median(actual - predicted) for target hour h
+forecast_hourly = forecast + scale * hour_error_h
+How it works:
+Validation residuals are grouped by forecast hour. The model applies hour-specific corrections where selected.
+Purpose:
+This corrects recurring hour-of-day error patterns.
+
+Formula 37. Same-hour-yesterday profile blend
+Formula:
+forecast_blended = (1 - weight) * forecast + weight * same_hour_yesterday_generation
+How it works:
+For selected plants, the forecast can be blended with the generation from the same forecast hour yesterday.
+Purpose:
+This improves forecast shape tracking when daily operating patterns are strong.
+
+Formula 38. Ramp-limit clipping during recursive forecast
+Formula:
+forecast = min(max(forecast, last_generation - ramp_limit), last_generation + ramp_limit)
+How it works:
+The next-hour forecast is constrained so it cannot jump too far from the previous hour's generation.
+Purpose:
+This reduces unrealistic recursive forecast jumps.
+
+Formula 39. Available capacity under planned outage
+Formula:
+available_capacity = sum(unit_capacity_i * status_i)
+How it works:
+Only units with planned status 1 contribute to available capacity. Units with status 0 contribute zero.
+Purpose:
+This ensures the plant forecast respects the planned outage file.
+
+Formula 40. Availability ratio
+Formula:
+availability_ratio = planned_available_capacity / baseline_available_capacity
+How it works:
+The planned available capacity is compared with the latest historical available capacity.
+Purpose:
+This shows whether future planned outages reduce or increase the available plant capacity relative to the latest condition.
+
+Formula 41. Unit allocation weights
+Formula:
+combined_weight = 0.50 * current_share + 0.35 * recent_median_share + 0.15 * same_hour_median_share
+How it works:
+The system learns how to distribute plant-level generation among available units using recent historical unit shares and same-hour behavior. If no useful shares exist, it falls back to capacity-based shares.
+Purpose:
+This converts the plant-level forecast into realistic unit-level forecasts.
+
+Formula 42. Unit-level allocation with capacity caps
+Formula:
+unit_generation_i = min(weight_i * plant_forecast, unit_capacity_i)
+How it works:
+The plant forecast is distributed to available units using learned weights. If a unit reaches capacity, the remaining generation is redistributed to units with remaining headroom.
+Purpose:
+This keeps unit forecasts within unit capacity and consistent with the plant total.
+
+Formula 43. Cascade total generation
+Formula:
+total_cascade_generation = sum(total_gen_plant) for Agus 1, 2, 4, 5, 6, and 7
+How it works:
+The forecasted total generation of all modeled Agus plants is added for each forecast hour.
+Purpose:
+This gives the total cascade-level generation forecast used for day-ahead planning.
+
+Formula 44. Operational MAPE threshold
+Formula:
+threshold = max(1 MW, 0.01 * plant_capacity)
+How it works:
+For MAPE only, rows with actual generation below this threshold are excluded.
+Purpose:
+This avoids misleading percentage errors when actual generation is near zero.
+
+Formula 45. Operational MAPE
+Formula:
+MAPE = (1/n) * sum(abs((actual_i - predicted_i) / actual_i)) * 100
+How it works:
+For included operational rows, each absolute error is divided by the actual generation and converted to percent.
+Purpose:
+This reports the average relative forecasting error in a way that is easy to interpret operationally.
+
+Formula 46. MAE
+Formula:
+MAE = (1/n) * sum(abs(actual_i - predicted_i))
+How it works:
+The absolute MW errors are averaged across all rows.
+Purpose:
+This reports the typical forecast error in MW.
+
+Formula 47. RMSE
+Formula:
+RMSE = sqrt((1/n) * sum((actual_i - predicted_i)^2))
+How it works:
+Errors are squared, averaged, and square-rooted back to MW.
+Purpose:
+This measures MW error while penalizing large errors more strongly than MAE.
+
+Formula 48. R2 or coefficient of determination
+Formula:
+R2 = 1 - (sum((actual_i - predicted_i)^2) / sum((actual_i - mean_actual)^2))
+How it works:
+The model's squared error is compared with the error of simply predicting the average actual generation.
+Purpose:
+This measures how much variance in actual generation is explained by the forecast.
+
+Formula 49. Absolute percentage error for diagnostics
+Formula:
+APE_i = abs(actual_i - predicted_i) / max(abs(actual_i), 0.000001) * 100
+How it works:
+Each row's percentage error is calculated with a tiny lower bound to avoid division by zero.
+Purpose:
+This supports row-level diagnostic tables and error analysis.
+
+Formula 50. Forecast shape delta
+Formula:
+true_delta_i = actual_i - actual_(i-1)
+pred_delta_i = predicted_i - predicted_(i-1)
+How it works:
+The code compares how the actual and predicted series change from hour to hour.
+Purpose:
+This evaluates whether the forecast follows the shape or movement of the actual generation curve.
+
+Formula 51. Shape delta MAE
+Formula:
+shape_delta_mae = mean(abs(true_delta_i - pred_delta_i))
+How it works:
+The absolute difference between actual hourly change and predicted hourly change is averaged.
+Purpose:
+This measures how well the forecast captures ramping behavior.
+
+Formula 52. Trend match rate
+Formula:
+trend_match_rate = mean(sign(true_delta_i) == sign(pred_delta_i))
+How it works:
+The code checks whether actual and predicted generation move in the same direction from one hour to the next.
+Purpose:
+This measures whether the forecast captures upward and downward movement correctly.
+
 
 MEMORIZE THESE NUMBERS
 
