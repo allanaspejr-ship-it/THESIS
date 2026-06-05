@@ -24,6 +24,7 @@ warnings.filterwarnings("ignore", category=UserWarning)
 BASE_DIR = Path(__file__).resolve().parents[1]
 METADATA_DIR = BASE_DIR / "metadata"
 OVERALL_METRICS_DIR = METADATA_DIR / "overall_metrics"
+DAY_AHEAD_BACKTEST_DIR = METADATA_DIR / "day_ahead_backtest"
 THESIS_FIGURES_DIR = BASE_DIR / "thesis_figures"
 
 # Stores plant labels, model source files, and figure output folders.
@@ -51,6 +52,20 @@ MODEL_FILES = {
         "metrics": OVERALL_METRICS_DIR / "xgboost_validation_testing_metrics.xlsx",
         "predictions": OVERALL_METRICS_DIR / "xgboost_testing_predictions.xlsx",
         "folder": METADATA_DIR / "xgboost",
+    },
+}
+DAY_AHEAD_MODEL_FILES = {
+    "RBFNN": {
+        "validation": DAY_AHEAD_BACKTEST_DIR / "rbfnn_validation_day_ahead_metrics.xlsx",
+        "testing": DAY_AHEAD_BACKTEST_DIR / "rbfnn_testing_day_ahead_metrics.xlsx",
+    },
+    "Random Forest": {
+        "validation": DAY_AHEAD_BACKTEST_DIR / "random_forest_validation_day_ahead_metrics.xlsx",
+        "testing": DAY_AHEAD_BACKTEST_DIR / "random_forest_testing_day_ahead_metrics.xlsx",
+    },
+    "XGBoost": {
+        "validation": DAY_AHEAD_BACKTEST_DIR / "xgboost_validation_day_ahead_metrics.xlsx",
+        "testing": DAY_AHEAD_BACKTEST_DIR / "xgboost_testing_day_ahead_metrics.xlsx",
     },
 }
 
@@ -410,6 +425,32 @@ def write_overall_comparison():
     save_excel(best, overall_dir / "best_model_summary.xlsx")
 
 
+# Writes fair rolling 24-hour day-ahead comparison tables for all models.
+def write_day_ahead_backtest_comparison():
+    if not all(path.exists() for spec in DAY_AHEAD_MODEL_FILES.values() for path in spec.values()):
+        print("Day-ahead backtest files incomplete; run Cell 2 and Cell 3 with day-ahead backtest enabled before Cell 4 comparison.")
+        return
+
+    comparisons = {}
+    for split_name in ["validation", "testing"]:
+        frames = []
+        for model_name, spec in DAY_AHEAD_MODEL_FILES.items():
+            df = pd.read_excel(spec[split_name])
+            df["model"] = model_name
+            frames.append(df)
+        comparison = pd.concat(frames, ignore_index=True)
+        comparison["plant"] = pd.Categorical(comparison["plant"], categories=PLANTS, ordered=True)
+        comparison = comparison.sort_values(["plant", "operational_mape", "model"]).reset_index(drop=True)
+        comparisons[split_name] = comparison
+        save_excel(comparison, DAY_AHEAD_BACKTEST_DIR / f"all_models_{split_name}_day_ahead_comparison.xlsx")
+
+    summary = pd.concat(
+        [df.assign(split=split_name) for split_name, df in comparisons.items()],
+        ignore_index=True,
+    )
+    save_excel(summary, DAY_AHEAD_BACKTEST_DIR / "all_models_day_ahead_backtest_summary.xlsx")
+
+
 # Runs all thesis figure and organized metadata generation steps.
 def main():
     # --- Figure and metadata generation pipeline ---
@@ -421,6 +462,7 @@ def main():
     generate_day_ahead_forecast_figure()
     write_model_metadata()
     write_overall_comparison()
+    write_day_ahead_backtest_comparison()
     print("DONE: Thesis figures and organized metadata files generated successfully.")
 
 

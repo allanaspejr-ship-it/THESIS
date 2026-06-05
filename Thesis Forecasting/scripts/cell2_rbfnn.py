@@ -56,6 +56,7 @@ RBFNN_META_DIR = META_DIR / "rbfnn"
 VALIDATION_METRICS_DIR = META_DIR / "validation_metrics"
 TESTING_METRICS_DIR = META_DIR / "testing_metrics"
 OVERALL_METRICS_DIR = META_DIR / "overall_metrics"
+DAY_AHEAD_BACKTEST_DIR = META_DIR / "day_ahead_backtest"
 TRAINING_HISTORY_DIR = META_DIR / "training_validation_loss"
 DIAGNOSTICS_DIR = OVERALL_METRICS_DIR / "actual_forecast_diagnostics"
 PLOTS_DIR = OVERALL_METRICS_DIR / "plots"
@@ -69,6 +70,7 @@ for folder in [
     VALIDATION_METRICS_DIR,
     TESTING_METRICS_DIR,
     OVERALL_METRICS_DIR,
+    DAY_AHEAD_BACKTEST_DIR,
     TRAINING_HISTORY_DIR,
     DIAGNOSTICS_DIR,
     PLOTS_DIR,
@@ -140,6 +142,26 @@ SHAPE_OPTIMIZED_PLANTS = {"agus5", "agus7"}
 PROFILE_BLEND_GRID = [0.0, 0.10, 0.20, 0.30, 0.40, 0.55, 0.70]
 HOURLY_CORRECTION_SCALE_GRID = [0.0, 0.25, 0.50, 0.75, 1.00]
 ACTUAL_NEXT_DAY_PATH = PROJECT_DIR / "july 1, 2025.xlsx"
+FEATURE_HISTORY_WINDOW = 240
+DAY_AHEAD_EVALUATION_TYPE = "rolling_24h_day_ahead_backtest"
+OUTAGE_INPUT_TYPE = "historical_outage_proxy"
+OUTAGE_INPUT_NOTE = (
+    "Historical unit availability was used only as a retrospective proxy for "
+    "planned outage information during backtesting because archived planned "
+    "outage schedules were unavailable."
+)
+HYDROLOGIC_INPUT_TYPE = "lagged_or_persistence_context"
+HYDROLOGIC_INPUT_NOTE = (
+    "Forecast-day rainfall and Lake Lanao outflow were not taken from actual "
+    "same-day records; lagged or most recent known values were used to avoid "
+    "future leakage."
+)
+DAY_AHEAD_THESIS_NOTE = (
+    "Each validation and testing day was forecast as a complete 24-hour horizon "
+    "using only data available before the forecast day. Lag and rolling features "
+    "were reconstructed from historical values and recursive predictions, while "
+    "actual forecast-day generation was used only after prediction for metrics."
+)
 FORECAST_PROFILE_BLEND_FALLBACK = {
     "agus5": {"same_hour_yesterday_weight": 0.70, "source": "forecast_fallback"},
     "agus7": {"same_hour_yesterday_weight": 0.20, "source": "forecast_fallback"},
@@ -1125,6 +1147,234 @@ def forecast_24h(raw_df, planned):
     return validate_and_fix_unit_forecast(forecast, planned)
 
 
+# ============================================================
+# LEAKAGE-SAFE ROLLING 24-HOUR DAY-AHEAD BACKTEST
+# ============================================================
+
+def valid_24h_dates(frame):
+    counts = frame.groupby(pd.to_datetime(frame["datetime"]).dt.date).size()
+    return {pd.Timestamp(day) for day, count in counts.items() if count == 24}
+
+
+def day_ahead_backtest_days(raw_df):
+    n = len(raw_df)
+    train_end = int(n * TRAIN_RATIO)
+    val_end = int(n * (TRAIN_RATIO + VAL_RATIO))
+    full_dates = valid_24h_dates(raw_df)
+
+    def usable_days(rows):
+        days = []
+        for day in sorted(valid_24h_dates(rows)):
+            if day in full_dates and not raw_df[raw_df["datetime"] < day].empty:
+                days.append(day)
+        return days
+
+    return {
+        "validation": usable_days(raw_df.iloc[train_end:val_end].copy()),
+        "testing": usable_days(raw_df.iloc[val_end:].copy()),
+    }
+
+
+def historical_proxy_outage_plan(actual_day):
+    planned = pd.DataFrame({
+        "Date": pd.to_datetime(actual_day["datetime"]).dt.normalize(),
+        "Hour": pd.to_numeric(actual_day["time"]).astype(int),
+    }).reset_index(drop=True)
+    for col in [c for c in actual_day.columns if re.fullmatch(r"out_agus[124567]_unit\d+", c)]:
+        planned[col] = np.where(pd.to_numeric(actual_day[col], errors="coerce").fillna(1) > 0, 1, 0)
+    return planned
+
+
+def history_before_forecast_day(raw_df, forecast_day):
+    return raw_df[raw_df["datetime"] < pd.Timestamp(forecast_day)].copy().reset_index(drop=True)
+
+
+def actual_forecast_day(raw_df, forecast_day):
+    start = pd.Timestamp(forecast_day)
+    end = start + pd.Timedelta(days=1)
+    return raw_df[(raw_df["datetime"] >= start) & (raw_df["datetime"] < end)].copy().reset_index(drop=True)
+
+
+def preferred_rbfnn_model_path(plant):
+    keras_path = MODEL_DIR / f"rbfnn_{plant}.keras"
+    if keras_path.exists():
+        return keras_path
+    return model_file(f"rbfnn_{plant}.keras")
+
+
+def load_rbfnn_backtest_bundle():
+    bundle = {}
+    for plant in PLANTS:
+        bundle[plant] = {
+            "meta": json.loads((MODEL_DIR / f"meta_{plant}.json").read_text()),
+            "model": tf.keras.models.load_model(
+                preferred_rbfnn_model_path(plant),
+                custom_objects={"RBFLayer": RBFLayer},
+                compile=False,
+            ),
+            "x_scaler": joblib.load(model_file(f"x_scaler_{plant}.pkl")),
+            "y_scaler": joblib.load(model_file(f"y_scaler_{plant}.pkl")),
+        }
+    return bundle
+
+
+def forecast_24h_from_loaded_bundle(history, planned, bundle):
+    forecast = empty_forecast_frame(planned)
+    hist = history.copy()
+
+    for step in range(24):
+        date_i = planned.loc[step, "Date"]
+        hour_i = int(planned.loc[step, "Hour"])
+        new_row = hist.iloc[-1].copy()
+        new_row["date"] = pd.to_datetime(date_i)
+        new_row["time"] = hour_i
+        new_row["datetime"] = pd.to_datetime(date_i) + pd.Timedelta(hours=hour_i - 1)
+        latest_feature_row = add_features(hist.tail(FEATURE_HISTORY_WINDOW).copy()).iloc[-1].to_dict()
+
+        for plant in PLANTS:
+            target = f"total_gen_{plant}"
+            model_info = bundle[plant]
+            meta = model_info["meta"]
+            x_row = feature_row_from_feature_dict(latest_feature_row.copy(), meta["X_cols"], date_i, hour_i)
+            delta = float(predict_delta(model_info["model"], model_info["x_scaler"], model_info["y_scaler"], x_row)[0])
+            last_val = float(hist[target].iloc[-1])
+            base_pred = last_val + float(meta["best_shrinkage"]) * delta + float(meta.get("bias_correction_mw", 0.0))
+            calibration = meta.get("bin_calibration")
+            calibration_basis = [base_pred] if calibration and calibration.get("basis") == "base_pred" else [last_val]
+            base_pred = float(apply_bin_calibration([base_pred], calibration_basis, plant, calibration)[0])
+            base_pred = apply_forecast_shape_adjustments(base_pred, hist, plant, hour_i, meta)
+            base_pred = float(np.clip(base_pred, last_val - float(meta["ramp_limit"]), last_val + float(meta["ramp_limit"])))
+            base_pred = float(np.clip(base_pred, 0.0, CAPACITY_MW[plant] * 1.05))
+
+            p_status = planned_status(planned, step, plant)
+            max_available = available_capacity(plant, p_status)
+            adjusted = float(np.clip(base_pred, 0.0, max_available)) if max_available > 0 else 0.0
+            unit_values = distribute_to_units(plant, adjusted, p_status, hist, hour_i)
+            for unit_col, value in unit_values.items():
+                forecast.loc[step, unit_col] = value
+                new_row[unit_col] = value
+            forecast.loc[step, f"total_gen_{plant}"] = sum(unit_values.values())
+            new_row[target] = forecast.loc[step, f"total_gen_{plant}"]
+            for out_col, value in p_status.items():
+                new_row[out_col] = value
+
+        hist = pd.concat([hist, pd.DataFrame([new_row])], ignore_index=True)
+        forecast.loc[step, CASCADE_FORECAST_COLUMN] = forecast.loc[step, TOTAL_FORECAST_COLUMNS].sum()
+
+    ordered_cols = ["Date", "Hour"] + UNIT_FORECAST_COLUMNS + TOTAL_FORECAST_COLUMNS + [CASCADE_FORECAST_COLUMN]
+    return forecast[ordered_cols]
+
+
+def day_ahead_prediction_rows(model_name, forecast_day, actual_day, forecast):
+    rows = []
+    actual_by_time = actual_day.set_index("datetime")
+    for idx in forecast.index:
+        dt_val = pd.to_datetime(forecast.loc[idx, "Date"]) + pd.Timedelta(hours=int(forecast.loc[idx, "Hour"]) - 1)
+        for plant in PLANTS:
+            rows.append({
+                "forecast_date": pd.Timestamp(forecast_day).date(),
+                "forecast_hour": int(forecast.loc[idx, "Hour"]),
+                "datetime": dt_val,
+                "plant": plant,
+                "actual_generation": float(actual_by_time.loc[dt_val, f"total_gen_{plant}"]),
+                "predicted_generation": float(forecast.loc[idx, f"total_gen_{plant}"]),
+                "model": model_name,
+                "evaluation_type": DAY_AHEAD_EVALUATION_TYPE,
+            })
+    return rows
+
+
+def day_ahead_metric_values(y_true, y_pred, plant):
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    mask = np.abs(y_true) >= operational_threshold(plant)
+    mape = np.nan if not mask.any() else float(np.mean(np.abs((y_true[mask] - y_pred[mask]) / np.abs(y_true[mask]))) * 100.0)
+    mae = mean_absolute_error(y_true, y_pred)
+    rmse = math.sqrt(mean_squared_error(y_true, y_pred))
+    r2 = r2_score(y_true, y_pred) if len(y_true) > 1 else np.nan
+    return mape, mae, rmse, r2
+
+
+def day_ahead_metrics_frame(predictions, model_name):
+    rows = []
+    df = pd.DataFrame(predictions)
+    for plant, group in df.groupby("plant", sort=False):
+        mape, mae, rmse, r2 = day_ahead_metric_values(group["actual_generation"], group["predicted_generation"], plant)
+        rows.append({
+            "model": model_name,
+            "plant": plant,
+            "number_of_forecast_days": int(group["forecast_date"].nunique()),
+            "number_of_forecast_hours": int(len(group)),
+            "operational_mape": mape,
+            "mae": mae,
+            "rmse": rmse,
+            "r2": r2,
+            "outage_input_type": OUTAGE_INPUT_TYPE,
+            "hydrologic_input_type": HYDROLOGIC_INPUT_TYPE,
+            "evaluation_type": DAY_AHEAD_EVALUATION_TYPE,
+        })
+    return pd.DataFrame(rows)
+
+
+def save_day_ahead_backtest_metadata(raw_df, split_days):
+    path = DAY_AHEAD_BACKTEST_DIR / "day_ahead_backtest_metadata.json"
+    existing = {}
+    if path.exists():
+        existing = json.loads(path.read_text())
+    existing.update({
+        "evaluation_type": DAY_AHEAD_EVALUATION_TYPE,
+        "models": sorted(set(existing.get("models", []) + ["RBFNN"])),
+        "validation_forecast_days": len(split_days["validation"]),
+        "testing_forecast_days": len(split_days["testing"]),
+        "data_start": str(raw_df["datetime"].min()),
+        "data_end": str(raw_df["datetime"].max()),
+        "outage_input_type": OUTAGE_INPUT_TYPE,
+        "outage_input_note": OUTAGE_INPUT_NOTE,
+        "hydrologic_input_type": HYDROLOGIC_INPUT_TYPE,
+        "hydrologic_input_note": HYDROLOGIC_INPUT_NOTE,
+        "scaling_and_model_fitting_control": "RBFNN scalers and model weights are fitted on the training split only; saved training-fitted scalers are reused for validation/testing backtests.",
+        "validation_testing_separation": "Validation may be used for selection/calibration. Testing data are reserved for final evaluation only.",
+        "preprocessing_leakage_control": "Cell 1 KNN imputation is offline source-data preparation and is documented as a limitation; rolling backtest model scaling is training-fitted only.",
+        "thesis_ready_note": DAY_AHEAD_THESIS_NOTE,
+    })
+    path.write_text(json.dumps(existing, indent=2))
+    print("Saved:", path)
+
+
+def save_rbfnn_day_ahead_backtest(raw_df):
+    print("Running leakage-safe rolling 24-hour day-ahead backtest for RBFNN...")
+    print("Using only historical information available before each forecast day.")
+    print("Forecast-day actual generation values are used only for scoring, not as inputs.")
+    split_days = day_ahead_backtest_days(raw_df)
+    bundle = load_rbfnn_backtest_bundle()
+
+    for split_name, days in split_days.items():
+        rows = []
+        print(f"RBFNN {split_name} rolling day-ahead days: {len(days)}")
+        for day in days:
+            actual_day = actual_forecast_day(raw_df, day)
+            if len(actual_day) != 24:
+                continue
+            hist = history_before_forecast_day(raw_df, day)
+            planned = historical_proxy_outage_plan(actual_day)
+            forecast = forecast_24h_from_loaded_bundle(hist, planned, bundle)
+            rows.extend(day_ahead_prediction_rows("RBFNN", day, actual_day, forecast))
+
+        pred_df = pd.DataFrame(rows)
+        metrics_df = day_ahead_metrics_frame(rows, "RBFNN") if rows else pd.DataFrame()
+        pred_path = DAY_AHEAD_BACKTEST_DIR / f"rbfnn_{split_name}_day_ahead_predictions.xlsx"
+        metrics_path = DAY_AHEAD_BACKTEST_DIR / f"rbfnn_{split_name}_day_ahead_metrics.xlsx"
+        pred_df.to_excel(pred_path, index=False)
+        metrics_df.to_excel(metrics_path, index=False)
+        format_excel(pred_path)
+        format_excel(metrics_path)
+        print("Saved:", pred_path)
+        print("Saved:", metrics_path)
+
+    save_day_ahead_backtest_metadata(raw_df, split_days)
+    print("Saved RBFNN rolling day-ahead backtest predictions and metrics.")
+
+
 # Loads optional actual next-day generation for post-forecast diagnostics.
 def load_actual_next_day_generation(path):
     if not path.exists():
@@ -1348,6 +1598,8 @@ def run_forecast_only():
     print("Fast forecast-only mode complete")
     print("Saved:", xlsx_path)
     print("Saved:", csv_path)
+    if "--day-ahead-backtest" in sys.argv:
+        save_rbfnn_day_ahead_backtest(raw_df)
 
 
 # Trains/tunes RBFNN models, saves metrics/artifacts, and generates forecasts.
@@ -1610,12 +1862,14 @@ def run_training_and_forecast():
     print(summary.to_string(index=False))
     print("Saved:", summary_path)
     print("Saved:", testing_path)
+    if not selected_plants:
+        save_rbfnn_day_ahead_backtest(raw_df)
 
 
 # Selects training mode when --train is passed; otherwise runs forecast-only mode.
 def main():
     args = sys.argv[1:]
-    allowed_args = {"--train", "--forecast-only"}
+    allowed_args = {"--train", "--forecast-only", "--day-ahead-backtest"}
     unknown = [arg for arg in args if arg.startswith("--") and arg not in allowed_args]
     if unknown:
         raise ValueError(f"Unsupported argument(s): {unknown}. Use --forecast-only or --train.")
