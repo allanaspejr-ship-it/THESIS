@@ -20,6 +20,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from xgboost import XGBRegressor
 
 warnings.filterwarnings("ignore", category=pd.errors.PerformanceWarning)
+warnings.filterwarnings("ignore", message="`sklearn.utils.parallel.delayed` should be used*")
 
 # ============================================================
 # PATH AND BENCHMARK CONFIGURATION
@@ -98,12 +99,16 @@ LAGS = [1, 2, 3, 6, 12, 24, 48, 72, 168]
 ROLL_WINDOWS = [3, 6, 12, 24, 48, 168]
 MODEL_KEYS = {"Random Forest": "random_forest", "XGBoost": "xgboost"}
 FEATURE_HISTORY_WINDOW = 240
+BENCHMARK_FINALIST_COUNT = 3
+R2_WEIGHT = 8.0
+NEGATIVE_R2_PENALTY = 25.0
 DAY_AHEAD_EVALUATION_TYPE = "rolling_24h_day_ahead_backtest"
-OUTAGE_INPUT_TYPE = "historical_outage_proxy"
+OUTAGE_INPUT_TYPE = "last_known_outage_status_before_forecast_day"
 OUTAGE_INPUT_NOTE = (
-    "Historical unit availability was used only as a retrospective proxy for "
-    "planned outage information during backtesting because archived planned "
-    "outage schedules were unavailable."
+    "Validation/testing day-ahead backtests persist only unit outage/status columns "
+    "from the latest historical row before each forecast day. Same-day actual unit "
+    "outage/status values are not used because archived planned outage schedules "
+    "were unavailable."
 )
 HYDROLOGIC_INPUT_TYPE = "lagged_or_persistence_context"
 HYDROLOGIC_INPUT_NOTE = (
@@ -201,6 +206,35 @@ def save_benchmark_fairness_audit(rows):
     print("Saved:", path)
 
 
+def update_model_selection_audit(section, rows):
+    path = META_DIR / "model_selection_audit.json"
+    audit = {}
+    if path.exists():
+        audit = json.loads(path.read_text())
+    existing_rows = audit.get(section, [])
+    if existing_rows and rows:
+        merged = {
+            (item.get("model"), item.get("plant")): item
+            for item in existing_rows
+        }
+        for item in rows:
+            merged[(item.get("model"), item.get("plant"))] = item
+        audit[section] = list(merged.values())
+    else:
+        audit[section] = rows or existing_rows
+    audit["controls"] = {
+        "split_strategy": "chronological 70/15/15",
+        "primary_model": "RBFNN",
+        "benchmark_models": ["Random Forest", "XGBoost"],
+        "selection_rule": "lowest R2-aware validation score; score penalizes MAPE, RMSE, low R2, and especially negative R2",
+        "day_ahead_selection": "models are selected with validation-only screening and R2-aware rolling 24-hour validation backtests",
+        "testing_used_for_tuning": False,
+        "metric_source": "real model predictions only",
+    }
+    path.write_text(json.dumps(audit, indent=2, default=str))
+    print("Saved:", path)
+
+
 # Rebuilds the hourly datetime column from public date and time fields.
 def rebuild_datetime(df):
     out = df.copy()
@@ -258,9 +292,14 @@ def model_payload(model, model_feature_columns):
 # Reads a saved model payload while supporting older plain-model files.
 def unpack_model_payload(payload):
     if isinstance(payload, dict) and "model" in payload:
-        return payload["model"], list(payload.get("feature_columns") or [])
+        model = payload["model"]
+        if hasattr(model, "n_jobs"):
+            model.n_jobs = 1
+        return model, list(payload.get("feature_columns") or [])
     feature_names = getattr(payload, "feature_names_in_", None)
     model_features = list(feature_names) if feature_names is not None else []
+    if hasattr(payload, "n_jobs"):
+        payload.n_jobs = 1
     return payload, model_features
 
 
@@ -272,22 +311,44 @@ def save_model_payload(model_key, plant, model, model_feature_columns):
     )
 
 
-# Creates the requested benchmark estimator with fixed reproducible settings.
-def make_benchmark_model(name):
+def benchmark_search_configs(name):
     if name == "Random Forest":
-        return RandomForestRegressor(n_estimators=400, min_samples_leaf=2, random_state=42, n_jobs=1)
+        return [
+            {"n_estimators": 400, "max_depth": None, "min_samples_leaf": 2, "max_features": "sqrt"},
+            {"n_estimators": 500, "max_depth": 18, "min_samples_leaf": 1, "max_features": 0.75},
+            {"n_estimators": 500, "max_depth": 24, "min_samples_leaf": 2, "max_features": 0.85},
+        ]
+    if name == "XGBoost":
+        return [
+            {"n_estimators": 400, "learning_rate": 0.04, "max_depth": 3, "subsample": 0.90, "colsample_bytree": 0.90, "reg_lambda": 1.0},
+            {"n_estimators": 550, "learning_rate": 0.03, "max_depth": 4, "subsample": 0.90, "colsample_bytree": 0.90, "reg_lambda": 1.0},
+            {"n_estimators": 700, "learning_rate": 0.02, "max_depth": 4, "subsample": 0.85, "colsample_bytree": 0.85, "reg_lambda": 1.5},
+        ]
+    raise ValueError(f"Unsupported benchmark model: {name}")
+
+
+# Creates the requested benchmark estimator with reproducible settings.
+def make_benchmark_model(name, config=None):
+    config = config or benchmark_search_configs(name)[1]
+    if name == "Random Forest":
+        return RandomForestRegressor(random_state=42, n_jobs=-1, **config)
     if name == "XGBoost":
         return XGBRegressor(
-            n_estimators=500,
-            learning_rate=0.03,
-            max_depth=4,
-            subsample=0.9,
-            colsample_bytree=0.9,
             objective="reg:squarederror",
             random_state=42,
-            n_jobs=1,
+            n_jobs=-1,
+            **config,
         )
     raise ValueError(f"Unsupported benchmark model: {name}")
+
+
+def candidate_score(metric_values):
+    mape = metric_values["operational_mape"]
+    mape_score = float(mape) if pd.notna(mape) else float("inf")
+    r2 = float(metric_values["r2"]) if pd.notna(metric_values["r2"]) else -999.0
+    r2_penalty = max(0.0, -r2) * NEGATIVE_R2_PENALTY
+    combined_score = mape_score + metric_values["rmse"] + (1.0 - r2) * R2_WEIGHT + r2_penalty
+    return (combined_score, -r2, mape_score, metric_values["rmse"])
 
 
 # ============================================================
@@ -295,14 +356,71 @@ def make_benchmark_model(name):
 # ============================================================
 
 # Trains one plant-specific benchmark model and saves it for reuse.
-def train_benchmark_model(name, plant, train, x_cols, y_col):
-    model = make_benchmark_model(name)
+def train_benchmark_model(name, plant, train, x_cols, y_col, val=None, raw_df=None, validation_forecast_days=None):
     X_train = train[x_cols].copy()
     model_feature_columns = X_train.columns.tolist()
-    print(f"Training {name} benchmark for {plant}")
-    model.fit(X_train, train[y_col])
+    if val is None or raw_df is None or validation_forecast_days is None:
+        model = make_benchmark_model(name)
+        print(f"Training {name} benchmark for {plant}")
+        model.fit(X_train, train[y_col])
+        save_model_payload(MODEL_KEYS[name], plant, model, model_feature_columns)
+        return model_payload(model, model_feature_columns), {}
+
+    target = f"total_gen_{plant}"
+    val_actual = val[f"{target}_tplus1"].values.astype(float)
+    screened = []
+    for config in benchmark_search_configs(name):
+        model = make_benchmark_model(name, config)
+        print(f"Training {name} benchmark for {plant} with {config}")
+        model.fit(X_train, train[y_col])
+        payload = model_payload(model, model_feature_columns)
+        val_delta = predict_aligned(payload, val[x_cols].copy(), plant)
+        val_pred = level_from_delta(val[target], val_delta, plant)
+        val_m = metrics(val_actual, val_pred, plant)
+        screened.append({
+            "screen_score": candidate_score(val_m),
+            "screen_metrics": val_m,
+            "config": config,
+            "payload": payload,
+        })
+
+    screened = sorted(screened, key=lambda item: item["screen_score"])
+    finalists = screened[:BENCHMARK_FINALIST_COUNT]
+    best = None
+    finalist_scores = []
+    for candidate in finalists:
+        rolling_score, rolling_metrics = rolling_benchmark_candidate_score(
+            raw_df,
+            validation_forecast_days,
+            name,
+            plant,
+            candidate["payload"],
+        )
+        candidate["rolling_score"] = rolling_score
+        candidate["rolling_validation_metrics"] = rolling_metrics
+        finalist_scores.append({
+            "config": candidate["config"],
+            "one_step_validation_score": candidate["screen_score"],
+            "rolling_validation_score": rolling_score,
+            "rolling_validation_metrics": rolling_metrics,
+        })
+        if best is None or rolling_score < best["rolling_score"]:
+            best = candidate
+
+    model, _ = unpack_model_payload(best["payload"])
     save_model_payload(MODEL_KEYS[name], plant, model, model_feature_columns)
-    return model_payload(model, model_feature_columns)
+    audit = {
+        "model": name,
+        "plant": plant,
+        "feature_count": len(model_feature_columns),
+        "selected_hyperparameters": best["config"],
+        "one_step_validation_score": best["screen_score"],
+        "rolling_validation_score": best["rolling_score"],
+        "rolling_validation_metrics": best["rolling_validation_metrics"],
+        "finalists": finalist_scores,
+        "testing_used_for_selection_or_calibration": False,
+    }
+    return best["payload"], audit
 
 
 # Predicts residual/delta output with saved feature alignment.
@@ -412,7 +530,12 @@ def feature_cols(df, plant):
     cols += [f"{plant}_units_running", f"{plant}_plant_available"]
     cols += [c for c in df.columns if c.startswith(f"tot_{plant}") or c.startswith(f"elev_{plant}") or c.startswith(f"spill_{plant}")]
     cols += [c for c in df.columns if "_lag" in c and (c.startswith("tot_agus") or c.startswith("elev_agus") or "outflow" in c or c.startswith("rainfall"))]
-    return [c for c in dict.fromkeys(cols) if c in df.columns]
+    selected = [c for c in dict.fromkeys(cols) if c in df.columns]
+    assert not any(
+        re.fullmatch(r"rainfall|.*outflow.*", c) and "_lag" not in c
+        for c in selected
+    ), "Contemporaneous rainfall/outflow must not be a feature"
+    return selected
 
 
 # Splits each plant series chronologically into training, validation, and testing sets.
@@ -771,14 +894,25 @@ def day_ahead_backtest_days(raw_df):
     }
 
 
-def historical_proxy_outage_plan(actual_day):
+def outage_plan_from_history(history, forecast_day):
+    """Build a leakage-safe unit outage plan from the last row before forecast_day."""
     planned = pd.DataFrame({
-        "Date": pd.to_datetime(actual_day["datetime"]).dt.normalize(),
-        "Hour": pd.to_numeric(actual_day["time"]).astype(int),
-    }).reset_index(drop=True)
-    for col in [c for c in actual_day.columns if re.fullmatch(r"out_agus[124567]_unit\d+", c)]:
-        planned[col] = np.where(pd.to_numeric(actual_day[col], errors="coerce").fillna(1) > 0, 1, 0)
+        "Date": [pd.Timestamp(forecast_day).normalize()] * 24,
+        "Hour": list(range(1, 25)),
+    })
+    if history.empty:
+        raise ValueError(f"No historical outage context available before {forecast_day}.")
+    if pd.to_datetime(history["datetime"]).max() >= pd.Timestamp(forecast_day):
+        raise ValueError("Outage history includes forecast-day rows; this would leak same-day unit outage status.")
+    latest = history.iloc[-1]
+    for col in [c for c in history.columns if re.fullmatch(r"out_agus[124567]_unit\d+", c)]:
+        value = pd.to_numeric(pd.Series([latest.get(col, 1)]), errors="coerce").fillna(1).iloc[0]
+        planned[col] = 1 if value > 0 else 0
     return planned
+
+
+def historical_proxy_outage_plan(actual_day):
+    raise RuntimeError("Do not use same-day actual outage status for validation/testing backtests.")
 
 
 def history_before_forecast_day(raw_df, forecast_day):
@@ -819,6 +953,86 @@ def backtest_feature_row_from_dict(row, plant, date_val, hour_val, model_feature
     return pd.DataFrame([{c: row.get(c, 0.0) if pd.notna(row.get(c, 0.0)) else 0.0 for c in x_cols}])
 
 
+def value_at_lag(frame, column, lag, default=0.0):
+    if column not in frame.columns or len(frame) <= lag:
+        return default
+    value = frame[column].iloc[-(lag + 1)]
+    return default if pd.isna(value) else float(value)
+
+
+def latest_value(frame, column, default=0.0):
+    if column not in frame.columns or frame.empty:
+        return default
+    value = frame[column].iloc[-1]
+    return default if pd.isna(value) else float(value)
+
+
+def fast_backtest_feature_row(hist, plant, date_val, hour_val, model_features):
+    dt = pd.to_datetime(date_val) + pd.Timedelta(hours=int(hour_val) - 1)
+    hour0 = int(hour_val) - 1
+    target = f"total_gen_{plant}"
+    out_cols = [c for c in hist.columns if re.fullmatch(fr"out_{plant}_unit\d+", c)]
+    feature_values = {
+        "hour_sin": np.sin(2 * np.pi * hour0 / 24),
+        "hour_cos": np.cos(2 * np.pi * hour0 / 24),
+        "day_sin": np.sin(2 * np.pi * dt.dayofweek / 7),
+        "day_cos": np.cos(2 * np.pi * dt.dayofweek / 7),
+        "month_sin": np.sin(2 * np.pi * dt.month / 12),
+        "month_cos": np.cos(2 * np.pi * dt.month / 12),
+        "is_weekend": int(dt.dayofweek >= 5),
+        "target_hour_sin": np.sin(2 * np.pi * hour0 / 24),
+        "target_hour_cos": np.cos(2 * np.pi * hour0 / 24),
+        "target_day_sin": np.sin(2 * np.pi * dt.dayofweek / 7),
+        "target_day_cos": np.cos(2 * np.pi * dt.dayofweek / 7),
+        "target_is_weekend": int(dt.dayofweek >= 5),
+        f"{target}_current": latest_value(hist, target),
+        f"{plant}_units_running": sum(latest_value(hist, c, 1.0) for c in out_cols),
+    }
+    feature_values[f"{plant}_plant_available"] = int(feature_values[f"{plant}_units_running"] > 0)
+
+    for col in model_features:
+        if col in feature_values:
+            continue
+        if col in hist.columns:
+            feature_values[col] = latest_value(hist, col)
+        elif m := re.fullmatch(r"(.+)_lag(\d+)", col):
+            feature_values[col] = value_at_lag(hist, m.group(1), int(m.group(2)))
+        elif m := re.fullmatch(r"(.+)_rollmean(\d+)", col):
+            values = pd.to_numeric(hist[m.group(1)].tail(int(m.group(2))), errors="coerce")
+            feature_values[col] = float(values.mean()) if values.notna().any() else 0.0
+        elif m := re.fullmatch(r"(.+)_rollstd(\d+)", col):
+            values = pd.to_numeric(hist[m.group(1)].tail(int(m.group(2))), errors="coerce")
+            feature_values[col] = float(values.std()) if values.notna().sum() > 1 else 0.0
+        elif m := re.fullmatch(r"(.+)_rollmin(\d+)", col):
+            values = pd.to_numeric(hist[m.group(1)].tail(int(m.group(2))), errors="coerce")
+            feature_values[col] = float(values.min()) if values.notna().any() else 0.0
+        elif m := re.fullmatch(r"(.+)_rollmax(\d+)", col):
+            values = pd.to_numeric(hist[m.group(1)].tail(int(m.group(2))), errors="coerce")
+            feature_values[col] = float(values.max()) if values.notna().any() else 0.0
+        elif m := re.fullmatch(r"(.+)_diff(\d+)", col):
+            base, lag = m.group(1), int(m.group(2))
+            feature_values[col] = latest_value(hist, base) - value_at_lag(hist, base, lag)
+        elif col == f"{target}_target_lag24":
+            feature_values[col] = value_at_lag(hist, target, 23)
+        elif col == f"{target}_target_lag168":
+            feature_values[col] = value_at_lag(hist, target, 167)
+        elif m := re.fullmatch(fr"(gen_{plant}_unit\d+)_share_current", col):
+            total = latest_value(hist, target)
+            feature_values[col] = latest_value(hist, m.group(1)) / total if total else 0.0
+        elif m := re.fullmatch(fr"(gen_{plant}_unit\d+)_share_lag(\d+)", col):
+            total_lag = value_at_lag(hist, target, int(m.group(2)))
+            feature_values[col] = value_at_lag(hist, m.group(1), int(m.group(2))) / total_lag if total_lag else 0.0
+        elif col == f"{plant}_upstream_current" and UPSTREAM_MAP.get(plant):
+            feature_values[col] = latest_value(hist, f"total_gen_{UPSTREAM_MAP[plant]}")
+        elif m := re.fullmatch(fr"{plant}_upstream_gen_lag(\d+)", col):
+            upstream = UPSTREAM_MAP.get(plant)
+            feature_values[col] = value_at_lag(hist, f"total_gen_{upstream}", int(m.group(1))) if upstream else 0.0
+        else:
+            feature_values[col] = 0.0
+
+    return pd.DataFrame([{c: feature_values.get(c, 0.0) for c in model_features}])
+
+
 def forecast_benchmark_24h_backtest(history, planned, models_by_plant):
     forecast = empty_forecast_frame(planned)
     hist = history.copy()
@@ -831,12 +1045,10 @@ def forecast_benchmark_24h_backtest(history, planned, models_by_plant):
         new_row["date"] = pd.to_datetime(date_i)
         new_row["time"] = hour_i
         new_row["datetime"] = pd.to_datetime(date_i) + pd.Timedelta(hours=hour_i - 1)
-        latest_feature_row = add_features(hist.tail(FEATURE_HISTORY_WINDOW).copy()).iloc[-1].to_dict()
-
         for plant in PLANTS:
             target = f"total_gen_{plant}"
             model, model_features = unpack_model_payload(models_by_plant[plant])
-            x_row = backtest_feature_row_from_dict(latest_feature_row.copy(), plant, date_i, hour_i, model_features)
+            x_row = fast_backtest_feature_row(hist.tail(FEATURE_HISTORY_WINDOW).copy(), plant, date_i, hour_i, model_features)
             if model_features:
                 x_row = align_features(x_row, model_features)
             delta = float(model.predict(x_row)[0])
@@ -865,6 +1077,86 @@ def forecast_benchmark_24h_backtest(history, planned, models_by_plant):
 
     ordered_cols = ["Date", "Hour"] + UNIT_FORECAST_COLUMNS + TOTAL_FORECAST_COLUMNS + [CASCADE_FORECAST_COLUMN]
     return forecast[ordered_cols]
+
+
+def rolling_benchmark_plant_predictions(raw_df, forecast_days, model_name, plant, model_info):
+    rows = []
+    target = f"total_gen_{plant}"
+    model, model_features = unpack_model_payload(model_info)
+    for day in forecast_days:
+        actual_day = actual_forecast_day(raw_df, day)
+        if len(actual_day) != 24:
+            continue
+        hist = history_before_forecast_day(raw_df, day)
+        if hist.empty:
+            continue
+        planned = outage_plan_from_history(hist, day)
+        baseline_status = latest_status(hist, plant)
+
+        for step in range(24):
+            date_i = planned.loc[step, "Date"]
+            hour_i = int(planned.loc[step, "Hour"])
+            dt_val = pd.to_datetime(date_i) + pd.Timedelta(hours=hour_i - 1)
+            new_row = hist.iloc[-1].copy()
+            new_row["date"] = pd.to_datetime(date_i)
+            new_row["time"] = hour_i
+            new_row["datetime"] = dt_val
+
+            x_row = fast_backtest_feature_row(hist.tail(FEATURE_HISTORY_WINDOW).copy(), plant, date_i, hour_i, model_features)
+            if model_features:
+                x_row = align_features(x_row, model_features)
+            delta = float(model.predict(x_row)[0])
+            last_val = float(hist[target].iloc[-1])
+            pred = last_val + delta
+            diffs = hist[target].tail(FEATURE_HISTORY_WINDOW).diff().abs().dropna()
+            limit = float(max(1.0, diffs.quantile(0.98))) if not diffs.empty else 2.0
+            pred = float(np.clip(pred, last_val - limit, last_val + limit))
+            pred = float(np.clip(pred, 0.0, CAPACITY_MW[plant] * 1.05))
+
+            p_status = planned_status(planned, step, plant)
+            ratio = availability_ratio(plant, baseline_status, p_status)
+            max_available = available_capacity(plant, p_status)
+            adjusted = float(np.clip(pred * ratio, 0.0, max_available)) if ratio > 0 else 0.0
+            unit_values = distribute_to_units(plant, adjusted, p_status, hist, hour_i)
+            for unit_col, value in unit_values.items():
+                new_row[unit_col] = value
+            predicted = float(sum(unit_values.values()))
+            new_row[target] = predicted
+            for out_col, value in p_status.items():
+                new_row[out_col] = value
+
+            rows.append({
+                "forecast_date": pd.Timestamp(day).date(),
+                "forecast_hour": hour_i,
+                "datetime": dt_val,
+                "plant": plant,
+                "actual_generation": float(actual_day.loc[actual_day["datetime"] == dt_val, target].iloc[0]),
+                "predicted_generation": predicted,
+                "model": model_name,
+                "evaluation_type": DAY_AHEAD_EVALUATION_TYPE,
+            })
+            hist = pd.concat([hist, pd.DataFrame([new_row])], ignore_index=True)
+    return pd.DataFrame(rows)
+
+
+def rolling_benchmark_candidate_score(raw_df, forecast_days, model_name, plant, model_info):
+    predictions = rolling_benchmark_plant_predictions(raw_df, forecast_days, model_name, plant, model_info)
+    if predictions.empty:
+        return (float("inf"), float("inf"), float("inf")), {}
+    mape, mae, rmse, r2 = day_ahead_metric_values(
+        predictions["actual_generation"],
+        predictions["predicted_generation"],
+        plant,
+    )
+    metrics_out = {
+        "operational_mape": mape,
+        "mae": mae,
+        "rmse": rmse,
+        "r2": r2,
+        "forecast_days": int(predictions["forecast_date"].nunique()),
+        "forecast_hours": int(len(predictions)),
+    }
+    return candidate_score(metrics_out), metrics_out
 
 
 def day_ahead_prediction_rows(model_name, forecast_day, actual_day, forecast):
@@ -897,16 +1189,30 @@ def day_ahead_metric_values(y_true, y_pred, plant):
     return mape, mae, rmse, r2
 
 
+def day_ahead_mape_counts(y_true, plant):
+    y_true = np.asarray(y_true, dtype=float)
+    mask = np.abs(y_true) >= operational_threshold(plant)
+    included = int(mask.sum())
+    excluded = int(len(mask) - included)
+    excluded_fraction = float(excluded / len(mask)) if len(mask) else np.nan
+    return included, excluded, excluded_fraction
+
+
 def day_ahead_metrics_frame(predictions, model_name):
     rows = []
     df = pd.DataFrame(predictions)
     for plant, group in df.groupby("plant", sort=False):
         mape, mae, rmse, r2 = day_ahead_metric_values(group["actual_generation"], group["predicted_generation"], plant)
+        included, excluded, excluded_fraction = day_ahead_mape_counts(group["actual_generation"], plant)
         rows.append({
             "model": model_name,
             "plant": plant,
             "number_of_forecast_days": int(group["forecast_date"].nunique()),
             "number_of_forecast_hours": int(len(group)),
+            "mape_rows_included": included,
+            "mape_rows_excluded": excluded,
+            "mape_rows_excluded_fraction": excluded_fraction,
+            "low_load_regime": bool(excluded_fraction > 0.40),
             "operational_mape": mape,
             "mae": mae,
             "rmse": rmse,
@@ -916,6 +1222,39 @@ def day_ahead_metrics_frame(predictions, model_name):
             "evaluation_type": DAY_AHEAD_EVALUATION_TYPE,
         })
     return pd.DataFrame(rows)
+
+
+def day_ahead_summary_frame(validation_metrics, testing_metrics, feature_counts):
+    validation = validation_metrics.rename(
+        columns={
+            "operational_mape": "val_operational_mape",
+            "mae": "val_mae",
+            "rmse": "val_rmse",
+            "r2": "val_r2",
+        }
+    )
+    testing = testing_metrics.rename(
+        columns={
+            "operational_mape": "test_operational_mape",
+            "mae": "test_mae",
+            "rmse": "test_rmse",
+            "r2": "test_r2",
+        }
+    )
+    summary = validation[["model", "plant", "val_operational_mape", "val_mae", "val_rmse", "val_r2"]].merge(
+        testing[["plant", "test_operational_mape", "test_mae", "test_rmse", "test_r2"]],
+        on="plant",
+        how="inner",
+    )
+    summary["feature_count"] = summary["plant"].map(feature_counts).astype(int)
+    return summary[METRICS_COLUMNS]
+
+
+def testing_prediction_export(predictions):
+    out = predictions.copy()
+    out["Date"] = pd.to_datetime(out["datetime"]).dt.date
+    out["Hour"] = pd.to_numeric(out["forecast_hour"]).astype(int)
+    return out[TESTING_PREDICTION_COLUMNS]
 
 
 def update_day_ahead_backtest_metadata(raw_df, split_days):
@@ -932,6 +1271,8 @@ def update_day_ahead_backtest_metadata(raw_df, split_days):
         "data_end": str(raw_df["datetime"].max()),
         "outage_input_type": OUTAGE_INPUT_TYPE,
         "outage_input_note": OUTAGE_INPUT_NOTE,
+        "unit_outage_status_rule": "For validation/testing, each 24-hour forecast day receives only the last-known out_agus*_unit* values from before 00:00 of that day.",
+        "same_day_actual_unit_outage_used": False,
         "hydrologic_input_type": HYDROLOGIC_INPUT_TYPE,
         "hydrologic_input_note": HYDROLOGIC_INPUT_NOTE,
         "benchmark_model_fitting_control": "Random Forest and XGBoost estimators are fitted on the training split only; saved models are reused for validation/testing backtests.",
@@ -942,7 +1283,7 @@ def update_day_ahead_backtest_metadata(raw_df, split_days):
     print("Saved:", path)
 
 
-def save_benchmark_day_ahead_backtests(raw_df, forecast_models):
+def save_benchmark_day_ahead_backtests(raw_df, forecast_models, force=False):
     print("Running leakage-safe rolling 24-hour day-ahead backtest for Random Forest and XGBoost...")
     print("Using only historical information available before each forecast day.")
     print("Forecast-day actual generation values are used only for scoring, not as inputs.")
@@ -950,27 +1291,53 @@ def save_benchmark_day_ahead_backtests(raw_df, forecast_models):
 
     for model_name, models_by_plant in forecast_models.items():
         model_key = model_name.lower().replace(" ", "_")
+        feature_counts = {
+            plant: len(unpack_model_payload(models_by_plant[plant])[1])
+            for plant in PLANTS
+        }
+        split_metrics = {}
+        split_predictions = {}
         for split_name, days in split_days.items():
-            rows = []
-            print(f"{model_name} {split_name} rolling day-ahead days: {len(days)}")
-            for day in days:
-                actual_day = actual_forecast_day(raw_df, day)
-                if len(actual_day) != 24:
-                    continue
-                hist = history_before_forecast_day(raw_df, day)
-                planned = historical_proxy_outage_plan(actual_day)
-                forecast = forecast_benchmark_24h_backtest(hist, planned, models_by_plant)
-                rows.extend(day_ahead_prediction_rows(model_name, day, actual_day, forecast))
-            pred_df = pd.DataFrame(rows)
-            metrics_df = day_ahead_metrics_frame(rows, model_name) if rows else pd.DataFrame()
             pred_path = DAY_AHEAD_BACKTEST_DIR / f"{model_key}_{split_name}_day_ahead_predictions.xlsx"
             metrics_path = DAY_AHEAD_BACKTEST_DIR / f"{model_key}_{split_name}_day_ahead_metrics.xlsx"
-            pred_df.to_excel(pred_path, index=False)
-            metrics_df.to_excel(metrics_path, index=False)
-            format_excel(pred_path)
+            if pred_path.exists() and metrics_path.exists() and not force:
+                print(f"Skipping existing {model_name} {split_name} day-ahead backtest outputs.")
+                pred_df = pd.read_excel(pred_path)
+                metrics_df = pd.read_excel(metrics_path)
+            else:
+                rows = []
+                print(f"{model_name} {split_name} rolling day-ahead days: {len(days)}")
+                for day in days:
+                    actual_day = actual_forecast_day(raw_df, day)
+                    if len(actual_day) != 24:
+                        continue
+                    hist = history_before_forecast_day(raw_df, day)
+                    planned = outage_plan_from_history(hist, day)
+                    forecast = forecast_benchmark_24h_backtest(hist, planned, models_by_plant)
+                    rows.extend(day_ahead_prediction_rows(model_name, day, actual_day, forecast))
+                pred_df = pd.DataFrame(rows)
+                metrics_df = day_ahead_metrics_frame(rows, model_name) if rows else pd.DataFrame()
+                pred_df.to_excel(pred_path, index=False)
+                metrics_df.to_excel(metrics_path, index=False)
+                format_excel(pred_path)
+                format_excel(metrics_path)
+                print("Saved:", pred_path)
+                print("Saved:", metrics_path)
+            split_predictions[split_name] = pred_df
+            split_metrics[split_name] = metrics_df
+
+        if {"validation", "testing"}.issubset(split_metrics):
+            metrics_path = META_DIR / f"{model_key}_validation_testing_metrics.xlsx"
+            summary = day_ahead_summary_frame(split_metrics["validation"], split_metrics["testing"], feature_counts)
+            summary.to_excel(metrics_path, index=False)
             format_excel(metrics_path)
-            print("Saved:", pred_path)
             print("Saved:", metrics_path)
+
+        if "testing" in split_predictions and not split_predictions["testing"].empty:
+            predictions_path = META_DIR / f"{model_key}_testing_predictions.xlsx"
+            testing_prediction_export(split_predictions["testing"]).to_excel(predictions_path, index=False)
+            format_excel(predictions_path)
+            print("Saved:", predictions_path)
 
     update_day_ahead_backtest_metadata(raw_df, split_days)
     print("Saved benchmark rolling day-ahead backtest predictions and metrics.")
@@ -1010,6 +1377,26 @@ def load_latest_inputs():
     return raw_df, planned
 
 
+def warn_if_saved_benchmarks_missing_rainfall_features(raw_df):
+    if "rainfall" not in raw_df.columns:
+        return
+    missing = []
+    for name, model_key in MODEL_KEYS.items():
+        for plant in PLANTS:
+            model_path = model_file(model_key, f"{model_key}_{plant}.pkl")
+            if not model_path.exists():
+                continue
+            _, model_features = unpack_model_payload(joblib.load(model_path))
+            if model_features and not any(str(col).startswith("rainfall_lag") for col in model_features):
+                missing.append(f"{name}:{plant}")
+    if missing:
+        print(
+            "WARNING: Rainfall was added to the cleaned feature set. "
+            "Retraining is recommended to ensure benchmark models use the updated hydrologic inputs. "
+            f"Saved benchmark models missing rainfall lag features for: {', '.join(missing)}"
+        )
+
+
 # Loads all saved Random Forest and XGBoost models.
 def load_saved_benchmark_models():
     forecast_models = {"Random Forest": {}, "XGBoost": {}}
@@ -1024,6 +1411,7 @@ def load_saved_benchmark_models():
 
 # Loads saved benchmark models or trains missing/mismatched models.
 def load_or_train_benchmark_models(raw_df):
+    warn_if_saved_benchmarks_missing_rainfall_features(raw_df)
     df = add_features(raw_df)
     forecast_models = {"Random Forest": {}, "XGBoost": {}}
 
@@ -1051,7 +1439,7 @@ def load_or_train_benchmark_models(raw_df):
                 print(f"Missing saved {name} model for {plant}; training a new model.")
 
             if retrain_model:
-                forecast_models[name][plant] = train_benchmark_model(name, plant, train, x_cols, y_col)
+                forecast_models[name][plant], _ = train_benchmark_model(name, plant, train, x_cols, y_col)
 
     return forecast_models
 
@@ -1150,17 +1538,92 @@ def run_forecast_only():
         save_benchmark_day_ahead_backtests(raw_df, forecast_models)
 
 
+def run_day_ahead_backtest_only():
+    raw_df, _ = load_latest_inputs()
+    forecast_models = load_or_train_benchmark_models(raw_df)
+    save_loaded_benchmark_selection_audit(forecast_models)
+    save_benchmark_day_ahead_backtests(raw_df, forecast_models, force=True)
+
+
+def save_loaded_benchmark_selection_audit(forecast_models=None):
+    if forecast_models is None:
+        forecast_models = load_saved_benchmark_models()
+    metric_frames = {}
+    for name, model_key in MODEL_KEYS.items():
+        metrics_path = META_DIR / f"{model_key}_validation_testing_metrics.xlsx"
+        if metrics_path.exists():
+            metric_frames[name] = pd.read_excel(metrics_path)
+    rows = []
+    for name, models_by_plant in forecast_models.items():
+        for plant, model_info in models_by_plant.items():
+            model, model_features = unpack_model_payload(model_info)
+            params = model.get_params() if hasattr(model, "get_params") else {}
+            selected = {
+                key: params.get(key)
+                for key in [
+                    "n_estimators",
+                    "max_depth",
+                    "min_samples_leaf",
+                    "max_features",
+                    "learning_rate",
+                    "subsample",
+                    "colsample_bytree",
+                    "reg_lambda",
+                ]
+                if key in params
+            }
+            metrics_row = {}
+            metrics_df = metric_frames.get(name)
+            if metrics_df is not None:
+                match = metrics_df[metrics_df["plant"] == plant]
+                if not match.empty:
+                    metrics_row = match.iloc[0].to_dict()
+            rows.append({
+                "model": name,
+                "plant": plant,
+                "feature_count": len(model_features),
+                "selected_hyperparameters": selected,
+                "validation_score_used_for_selection": {
+                    "operational_mape": metrics_row.get("val_operational_mape"),
+                    "rmse": metrics_row.get("val_rmse"),
+                    "r2": metrics_row.get("val_r2"),
+                },
+                "testing_score_after_final_evaluation": {
+                    "operational_mape": metrics_row.get("test_operational_mape"),
+                    "mae": metrics_row.get("test_mae"),
+                    "rmse": metrics_row.get("test_rmse"),
+                    "r2": metrics_row.get("test_r2"),
+                },
+                "selection_source": "saved tuned benchmark model",
+                "testing_used_for_selection_or_calibration": False,
+            })
+    update_model_selection_audit("benchmarks", rows)
+
+
 # Trains benchmark models, saves metrics/artifacts, and generates forecasts.
 def run_training_and_forecast():
     raw_df, planned = load_latest_inputs()
+    selected_plants = [arg.lower() for arg in sys.argv[sys.argv.index("--train") + 1:] if not arg.startswith("--")]
+    if selected_plants:
+        invalid = sorted(set(selected_plants) - set(PLANTS))
+        if invalid:
+            raise ValueError(f"Unknown plant(s): {invalid}. Valid plants: {PLANTS}")
     # --- Feature preparation shared by Random Forest and XGBoost ---
     df = add_features(raw_df)
     rows = []
     testing_prediction_rows = {"Random Forest": [], "XGBoost": []}
     forecast_models = {"Random Forest": {}, "XGBoost": {}}
     fairness_rows = []
+    selection_audit_rows = []
+    validation_forecast_days = day_ahead_backtest_days(raw_df)["validation"]
 
     for plant in PLANTS:
+        if selected_plants and plant not in selected_plants:
+            for name, model_key in MODEL_KEYS.items():
+                model_path = model_file(model_key, f"{model_key}_{plant}.pkl")
+                if model_path.exists():
+                    forecast_models[name][plant] = joblib.load(model_path)
+            continue
         target = f"total_gen_{plant}"
         y_col = f"{target}_delta_tplus1"
         x_cols = feature_cols(df, plant)
@@ -1169,7 +1632,18 @@ def run_training_and_forecast():
 
         for name in ["Random Forest", "XGBoost"]:
             # --- Model training and validation/testing evaluation ---
-            model_info = train_benchmark_model(name, plant, train, x_cols, y_col)
+            model_info, selection_audit = train_benchmark_model(
+                name,
+                plant,
+                train,
+                x_cols,
+                y_col,
+                val=val,
+                raw_df=raw_df,
+                validation_forecast_days=validation_forecast_days,
+            )
+            if selection_audit:
+                selection_audit_rows.append(selection_audit)
             _, model_feature_columns = unpack_model_payload(model_info)
             leakage_check = leakage_feature_audit(model_feature_columns)
             val_delta_pred = predict_aligned(model_info, val[x_cols].copy(), plant)
@@ -1218,6 +1692,16 @@ def run_training_and_forecast():
             forecast_models[name][plant] = model_info
 
     result = pd.DataFrame(rows)[METRICS_COLUMNS]
+    if selected_plants:
+        for model_name, model_key in MODEL_KEYS.items():
+            existing_path = META_DIR / f"{model_key}_validation_testing_metrics.xlsx"
+            if existing_path.exists():
+                existing = pd.read_excel(existing_path)
+                existing = existing[~existing["plant"].isin(selected_plants)]
+                result = pd.concat([existing, result], ignore_index=True)
+        result["plant_order"] = result["plant"].map({plant: idx for idx, plant in enumerate(PLANTS)})
+        result["model_order"] = result["model"].map({model: idx for idx, model in enumerate(MODEL_KEYS)})
+        result = result.sort_values(["model_order", "plant_order"]).drop(columns=["model_order", "plant_order"]).reset_index(drop=True)
     rf_metrics_path = META_DIR / "random_forest_validation_testing_metrics.xlsx"
     xgb_metrics_path = META_DIR / "xgboost_validation_testing_metrics.xlsx"
     result[result["model"] == "Random Forest"].to_excel(rf_metrics_path, index=False)
@@ -1225,11 +1709,16 @@ def run_training_and_forecast():
     format_excel(rf_metrics_path)
     format_excel(xgb_metrics_path)
     save_benchmark_fairness_audit(fairness_rows)
+    update_model_selection_audit("benchmarks", selection_audit_rows)
 
     for name, prediction_rows in testing_prediction_rows.items():
         model_key = name.lower().replace(" ", "_")
         predictions_path = META_DIR / f"{model_key}_testing_predictions.xlsx"
         predictions = pd.DataFrame(prediction_rows)[TESTING_PREDICTION_COLUMNS]
+        if selected_plants and predictions_path.exists():
+            existing_predictions = pd.read_excel(predictions_path)
+            existing_predictions = existing_predictions[~existing_predictions["plant"].isin(selected_plants)]
+            predictions = pd.concat([existing_predictions, predictions], ignore_index=True)
         predictions.to_excel(predictions_path, index=False)
         format_excel(predictions_path)
         print("Saved:", predictions_path)
@@ -1248,7 +1737,11 @@ def run_training_and_forecast():
 
 # Selects training mode when --train is passed; otherwise runs forecast-only mode.
 def main():
-    if "--train" in sys.argv:
+    if "--audit-only" in sys.argv:
+        save_loaded_benchmark_selection_audit()
+    elif "--day-ahead-backtest" in sys.argv and "--train" not in sys.argv:
+        run_day_ahead_backtest_only()
+    elif "--train" in sys.argv:
         run_training_and_forecast()
     else:
         run_forecast_only()

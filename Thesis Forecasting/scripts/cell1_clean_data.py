@@ -151,6 +151,9 @@ def standardize_columns(df):
         nc = nc.replace("elev_agus_6", "elev_agus6")
         nc = nc.replace("elev_agus_7", "elev_agus7")
 
+        if "rainfall" in nc:
+            nc = "rainfall"
+
         nc = re.sub(r"^out_(agus[124567])_\1_(unit\d+)$", r"out_\1_\2", nc)
         nc = re.sub(r"^gen_(agus[124567])_\1_(unit\d+)$", r"gen_\1_\2", nc)
 
@@ -164,6 +167,39 @@ def standardize_columns(df):
         renamed[c] = nc
 
     return df.rename(columns=renamed)
+
+
+def consolidate_rainfall_column(df):
+    rainfall_cols = [c for c in df.columns if str(c) == "rainfall" or "rainfall" in str(c)]
+    if not rainfall_cols:
+        return df, False
+    out = df.copy()
+    rainfall_values = out[rainfall_cols].apply(lambda col: pd.to_numeric(col, errors="coerce"))
+    out = out.drop(columns=rainfall_cols)
+    out["rainfall"] = rainfall_values.bfill(axis=1).iloc[:, 0]
+    return out, True
+
+
+def rainfall_daily_consistency(clean_df):
+    if "rainfall" not in clean_df.columns:
+        return {
+            "rainfall_included": False,
+            "rainfall_daily_consistency_check_performed": False,
+            "rainfall_daily_consistency_passed": False,
+            "rainfall_dates_with_multiple_values_count": 0,
+            "rainfall_dates_with_multiple_values": [],
+        }
+    rainfall_by_day = clean_df[["date", "rainfall"]].copy()
+    rainfall_by_day["date"] = pd.to_datetime(rainfall_by_day["date"]).dt.strftime("%Y-%m-%d")
+    counts = rainfall_by_day.groupby("date")["rainfall"].nunique(dropna=True)
+    affected = counts[counts > 1].index.tolist()
+    return {
+        "rainfall_included": True,
+        "rainfall_daily_consistency_check_performed": True,
+        "rainfall_daily_consistency_passed": len(affected) == 0,
+        "rainfall_dates_with_multiple_values_count": int(len(affected)),
+        "rainfall_dates_with_multiple_values": affected,
+    }
 
 
 # Combines source date and hour fields into one sortable hourly timestamp.
@@ -333,6 +369,7 @@ def main():
     df = raw.iloc[3:].copy().reset_index(drop=True)
     df.columns = cols
     df = standardize_columns(df)
+    df, rainfall_detected = consolidate_rainfall_column(df)
 
     for c in df.columns:
         if c not in ["date", "time"]:
@@ -476,6 +513,7 @@ def main():
 
     keep_cols = list(dict.fromkeys([c for c in keep_cols if c in dfh.columns]))
     clean_df = dfh[keep_cols].copy()
+    rainfall_check = rainfall_daily_consistency(clean_df)
 
     cleaned_xlsx = DIRS["runtime"] / "cleaned_hourly_data.xlsx"
     cleaned_parquet = DIRS["runtime"] / "cleaned_hourly_data.parquet"
@@ -494,6 +532,20 @@ def main():
                 "latest_timestamp": str(clean_df["datetime"].max()),
                 "rows": int(len(cleaned_output_df)),
                 "columns": list(cleaned_output_df.columns),
+                "rainfall": {
+                    "included_in_cleaned_dataset": bool("rainfall" in cleaned_output_df.columns),
+                    "detected_in_raw_workbook": bool(rainfall_detected),
+                    "converted_to_numeric": bool(rainfall_detected),
+                    "daily_derived_hourly_equivalent": True,
+                    "true_hourly_sensor_measurement": False,
+                    "divided_by_24_again": False,
+                    "treated_as": "hydrologic context variable",
+                    **rainfall_check,
+                },
+                "hydrologic_context_variables": {
+                    "rainfall": "Rainfall (daily-derived hourly-equivalent hydrologic context variable)",
+                    "lake_lanao_outflow": "Lake Lanao outflow hydrologic context variable",
+                },
                 "note": "Saved cleaned files omit datetime; downstream scripts rebuild it from date and time.",
             },
             f,
@@ -506,6 +558,14 @@ def main():
     print("Saved Metadata:", meta_json)
     print("Latest timestamp:", clean_df["datetime"].max())
     print("Columns kept:", len(clean_df.columns))
+    if "rainfall" in cleaned_output_df.columns:
+        print("Rainfall included in cleaned dataset as daily-derived hourly-equivalent hydrologic context variable.")
+        if rainfall_check["rainfall_daily_consistency_passed"]:
+            print("Rainfall daily consistency check passed: no dates with multiple rainfall values.")
+        else:
+            print(f"Rainfall daily consistency warning: {rainfall_check['rainfall_dates_with_multiple_values_count']} dates have multiple rainfall values.")
+    else:
+        print("Rainfall was not found in the raw workbook and is not present in the cleaned dataset.")
 
     # ========================================================
     # PLANNED OUTAGE TEMPLATE

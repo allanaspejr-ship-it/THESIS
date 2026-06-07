@@ -6,9 +6,13 @@ It does not delete or move benchmark, data, models, outputs, or scripts.
 """
 
 from pathlib import Path
+import json
 import math
 import warnings
 
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -68,6 +72,17 @@ DAY_AHEAD_MODEL_FILES = {
         "testing": DAY_AHEAD_BACKTEST_DIR / "xgboost_testing_day_ahead_metrics.xlsx",
     },
 }
+MODEL_KEYS = {
+    "RBFNN": "rbfnn",
+    "Random Forest": "random_forest",
+    "XGBoost": "xgboost",
+}
+MODEL_DIRS = {
+    "RBFNN": BASE_DIR / "models" / "rbfnn",
+    "Random Forest": BASE_DIR / "models" / "random_forest",
+    "XGBoost": BASE_DIR / "models" / "xgboost",
+}
+CAPACITY_MW = {"agus1": 80.0, "agus2": 180.0, "agus4": 158.1, "agus5": 55.0, "agus6": 219.0, "agus7": 54.0}
 
 FIGURE_DIRS = {
     "cleaned_profiles": THESIS_FIGURES_DIR / "cleaned_profiles",
@@ -88,8 +103,6 @@ SAVED_OUTPUTS = []
 def ensure_dirs():
     for path in FIGURE_DIRS.values():
         path.mkdir(parents=True, exist_ok=True)
-    for spec in MODEL_FILES.values():
-        spec["folder"].mkdir(parents=True, exist_ok=True)
     (METADATA_DIR / "overall_comparison").mkdir(parents=True, exist_ok=True)
 
 
@@ -152,9 +165,20 @@ def format_excel(path):
 # Saves a dataframe to Excel and applies workbook formatting.
 def save_excel(df, path, sheet_name="Sheet1"):
     path.parent.mkdir(parents=True, exist_ok=True)
-    with pd.ExcelWriter(path, engine="openpyxl") as writer:
-        df.to_excel(writer, sheet_name=sheet_name, index=False)
-    format_excel(path)
+    temp_path = path.with_name(f".{path.stem}.tmp{path.suffix}")
+    if temp_path.exists():
+        temp_path.unlink()
+    try:
+        with pd.ExcelWriter(temp_path, engine="openpyxl") as writer:
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
+        format_excel(temp_path)
+        temp_path.replace(path)
+    except PermissionError:
+        if temp_path.exists():
+            temp_path.unlink()
+        raise PermissionError(
+            f"Cannot update {path}. Close this workbook in Excel, then rerun cell 4."
+        )
     save_path(path)
 
 
@@ -181,40 +205,184 @@ def read_cleaned_data():
 
 
 # Reads model-level validation and testing metrics.
+def metric_count_frame(model_name, split):
+    pred_path = DAY_AHEAD_BACKTEST_DIR / f"{MODEL_KEYS[model_name]}_{split}_day_ahead_predictions.xlsx"
+    if not pred_path.exists():
+        return pd.DataFrame()
+    predictions = pd.read_excel(pred_path)
+    rows = []
+    for plant, group in predictions.groupby("plant", sort=False):
+        plant = str(plant)
+        threshold = max(1.0, 0.01 * CAPACITY_MW[plant])
+        actual = pd.to_numeric(group["actual_generation"], errors="coerce").fillna(0.0).abs()
+        included = int((actual >= threshold).sum())
+        excluded = int((actual < threshold).sum())
+        excluded_fraction = float(excluded / len(actual)) if len(actual) else np.nan
+        rows.append({
+            "plant": plant,
+            "mape_rows_included": included,
+            "mape_rows_excluded": excluded,
+            "mape_rows_excluded_fraction": excluded_fraction,
+            "low_load_regime": bool(excluded_fraction > 0.40),
+        })
+    return pd.DataFrame(rows)
+
+
 def read_metrics(model_name):
-    df = pd.read_excel(require_file(MODEL_FILES[model_name]["metrics"]))
-    df["plant"] = pd.Categorical(df["plant"], categories=PLANTS, ordered=True)
-    return df.sort_values("plant").reset_index(drop=True)
+    day_ahead_validation = DAY_AHEAD_MODEL_FILES[model_name]["validation"]
+    day_ahead_testing = DAY_AHEAD_MODEL_FILES[model_name]["testing"]
+    if day_ahead_validation.exists() and day_ahead_testing.exists():
+        validation = pd.read_excel(day_ahead_validation).rename(
+            columns={
+                "operational_mape": "val_operational_mape",
+                "mae": "val_mae",
+                "rmse": "val_rmse",
+                "r2": "val_r2",
+            }
+        )
+        testing = pd.read_excel(day_ahead_testing).rename(
+            columns={
+                "operational_mape": "test_operational_mape",
+                "mae": "test_mae",
+                "rmse": "test_rmse",
+                "r2": "test_r2",
+            }
+        )
+        feature_counts = read_feature_counts(model_name)
+        validation_cols = ["model", "plant", "val_operational_mape", "val_mae", "val_rmse", "val_r2"]
+        testing_cols = ["plant", "test_operational_mape", "test_mae", "test_rmse", "test_r2"]
+        for col in ["mape_rows_included", "mape_rows_excluded", "mape_rows_excluded_fraction", "low_load_regime"]:
+            if col in validation.columns:
+                validation_cols.append(col)
+            if col in testing.columns:
+                testing_cols.append(col)
+        df = validation[validation_cols].merge(
+            testing[testing_cols],
+            on="plant",
+            how="inner",
+            suffixes=("_validation", "_testing"),
+        )
+        for split_name, suffix in [("validation", "_validation"), ("testing", "_testing")]:
+            counts = metric_count_frame(model_name, split_name)
+            if counts.empty:
+                continue
+            for col in ["mape_rows_included", "mape_rows_excluded", "mape_rows_excluded_fraction", "low_load_regime"]:
+                target_col = f"{col}{suffix}"
+                if target_col not in df.columns:
+                    df[target_col] = df["plant"].astype(str).map(dict(zip(counts["plant"].astype(str), counts[col])))
+        df["feature_count"] = df["plant"].map(feature_counts).fillna(0).astype(int)
+        df["evaluation_type"] = "rolling_24h_day_ahead_backtest"
+        if "low_load_regime_testing" in df.columns:
+            df["low_load_regime"] = df["low_load_regime_testing"].astype(bool)
+        elif "low_load_regime" in df.columns:
+            df["low_load_regime"] = df["low_load_regime"].astype(bool)
+        else:
+            df["low_load_regime"] = False
+        df["plant"] = pd.Categorical(df["plant"], categories=PLANTS, ordered=True)
+        return df.sort_values("plant").reset_index(drop=True)
+
+    warning = (
+        f"Missing rolling day-ahead metrics for {model_name}: "
+        f"{day_ahead_validation} and/or {day_ahead_testing}. "
+        "Strict rolling 24-hour day-ahead metrics are required for thesis outputs."
+    )
+    warnings.warn(warning)
+    print("WARNING:", warning)
+    raise FileNotFoundError(warning)
 
 
 # Reads testing predictions and sorts them by plant and time.
 def read_predictions(model_name):
-    df = pd.read_excel(require_file(MODEL_FILES[model_name]["predictions"]))
-    df = rebuild_datetime(df)
-    df["plant"] = pd.Categorical(df["plant"], categories=PLANTS, ordered=True)
-    return df.sort_values(["plant", "datetime"]).reset_index(drop=True)
+    day_ahead_testing = DAY_AHEAD_BACKTEST_DIR / f"{MODEL_KEYS[model_name]}_testing_day_ahead_predictions.xlsx"
+    if day_ahead_testing.exists():
+        df = pd.read_excel(day_ahead_testing)
+        df = rebuild_datetime(df)
+        df["plant"] = pd.Categorical(df["plant"], categories=PLANTS, ordered=True)
+        return df.sort_values(["plant", "datetime"]).reset_index(drop=True)
+
+    raise FileNotFoundError(f"Required strict day-ahead prediction file not found: {day_ahead_testing}")
+
+
+# Reads saved feature counts for day-ahead metric summaries.
+def read_feature_counts(model_name):
+    if model_name not in MODEL_FILES:
+        return {plant: 0 for plant in PLANTS}
+    if model_name == "RBFNN":
+        counts = {}
+        for plant in PLANTS:
+            meta_path = MODEL_DIRS[model_name] / f"meta_{plant}.json"
+            if meta_path.exists():
+                meta = json.loads(meta_path.read_text())
+                counts[plant] = len(meta.get("X_cols", []))
+        if counts:
+            return counts
+
+    metrics_path = MODEL_FILES[model_name]["metrics"]
+    if metrics_path.exists():
+        metrics = pd.read_excel(metrics_path)
+        if {"plant", "feature_count"}.issubset(metrics.columns):
+            return dict(zip(metrics["plant"], metrics["feature_count"]))
+
+    audit_path = OVERALL_METRICS_DIR / "benchmark_fairness_audit.xlsx"
+    if audit_path.exists():
+        audit = pd.read_excel(audit_path)
+        if {"model", "plant", "feature count"}.issubset(audit.columns):
+            audit = audit[audit["model"] == model_name]
+            return dict(zip(audit["plant"], audit["feature count"]))
+    return {}
 
 
 # Converts validation/testing metric columns into one common table schema.
 def normalized_metric_frames(metrics_df, model_name):
     base = metrics_df.copy()
     base["model"] = model_name
-    validation = base.rename(
+    base["evaluation_type"] = base.get("evaluation_type", "unknown")
+    base["low_load_regime"] = base.get("low_load_regime", False)
+    validation_base = base.copy()
+    testing_base = base.copy()
+    for source, target in [
+        ("mape_rows_included_validation", "mape_rows_included"),
+        ("mape_rows_excluded_validation", "mape_rows_excluded"),
+        ("mape_rows_excluded_fraction_validation", "mape_rows_excluded_fraction"),
+    ]:
+        validation_base[target] = validation_base[source] if source in validation_base.columns else np.nan
+    for source, target in [
+        ("mape_rows_included_testing", "mape_rows_included"),
+        ("mape_rows_excluded_testing", "mape_rows_excluded"),
+        ("mape_rows_excluded_fraction_testing", "mape_rows_excluded_fraction"),
+    ]:
+        testing_base[target] = testing_base[source] if source in testing_base.columns else np.nan
+
+    output_cols = [
+        "model",
+        "plant",
+        "feature_count",
+        "MAPE",
+        "MAE",
+        "RMSE",
+        "R2",
+        "evaluation_type",
+        "mape_rows_included",
+        "mape_rows_excluded",
+        "mape_rows_excluded_fraction",
+        "low_load_regime",
+    ]
+    validation = validation_base.rename(
         columns={
             "val_operational_mape": "MAPE",
             "val_mae": "MAE",
             "val_rmse": "RMSE",
             "val_r2": "R2",
         }
-    )[["model", "plant", "feature_count", "MAPE", "MAE", "RMSE", "R2"]]
-    testing = base.rename(
+    )[output_cols]
+    testing = testing_base.rename(
         columns={
             "test_operational_mape": "MAPE",
             "test_mae": "MAE",
             "test_rmse": "RMSE",
             "test_r2": "R2",
         }
-    )[["model", "plant", "feature_count", "MAPE", "MAE", "RMSE", "R2"]]
+    )[output_cols]
     return validation, testing
 
 
@@ -246,7 +414,7 @@ def generate_testing_actual_vs_forecast_figures():
         plt.figure(figsize=(12, 5))
         plt.plot(plant_df["datetime"], plant_df["actual_generation"], label="Actual", linewidth=1.0)
         plt.plot(plant_df["datetime"], plant_df["predicted_generation"], label="Forecast", linewidth=1.0)
-        plt.title(f"Figure 4.{offset}: Testing Actual vs Forecast - {PLANT_LABELS[plant]}")
+        plt.title(f"Figure 4.{offset}: Testing Actual vs Forecast - {PLANT_LABELS[plant]} (rolling 24h day-ahead)")
         plt.xlabel("Datetime")
         plt.ylabel("Generation (MW)")
         plt.grid(True, alpha=0.25)
@@ -279,7 +447,7 @@ def generate_error_analysis_figures():
     low = min(actual.min(), predicted.min())
     high = max(actual.max(), predicted.max())
     plt.plot([low, high], [low, high], color="black", linestyle="--", linewidth=1)
-    plt.title("Figure 4.19: RBFNN Actual vs Predicted Scatter")
+    plt.title("Figure 4.19: RBFNN Actual vs Predicted Scatter (rolling 24h day-ahead)")
     plt.xlabel("Actual Generation (MW)")
     plt.ylabel("Predicted Generation (MW)")
     plt.grid(True, alpha=0.25)
@@ -288,7 +456,7 @@ def generate_error_analysis_figures():
     plt.figure(figsize=(8, 5))
     plt.hist(residual, bins=60, color="#4c78a8", edgecolor="white")
     plt.axvline(0, color="black", linestyle="--", linewidth=1)
-    plt.title("Figure 4.20: RBFNN Residual Distribution")
+    plt.title("Figure 4.20: RBFNN Residual Distribution (rolling 24h day-ahead)")
     plt.xlabel("Residual (Actual - Forecast, MW)")
     plt.ylabel("Frequency")
     plt.grid(True, axis="y", alpha=0.25)
@@ -297,7 +465,7 @@ def generate_error_analysis_figures():
     mape_df = plant_mape(df)
     plt.figure(figsize=(8, 5))
     plt.bar([PLANT_LABELS[p] for p in mape_df["plant"]], mape_df["MAPE"], color="#59a14f")
-    plt.title("Figure 4.21: RBFNN Testing MAPE per Plant")
+    plt.title("Figure 4.21: RBFNN Testing MAPE per Plant (rolling 24h day-ahead)")
     plt.xlabel("Plant")
     plt.ylabel("MAPE (%)")
     plt.grid(True, axis="y", alpha=0.25)
@@ -306,17 +474,18 @@ def generate_error_analysis_figures():
 
 # Generates RBFNN, Random Forest, and XGBoost comparison bar charts.
 def generate_benchmark_comparison_figures():
-    all_metrics = pd.concat([read_metrics(model) for model in MODEL_FILES], ignore_index=True)
-    model_order = ["RBFNN", "Random Forest", "XGBoost"]
+    all_metrics = pd.concat([read_metrics(model) for model in DAY_AHEAD_MODEL_FILES], ignore_index=True)
+    model_order = [model for model in DAY_AHEAD_MODEL_FILES if model in set(all_metrics["model"])]
     pivot_mape = all_metrics.pivot(index="plant", columns="model", values="test_operational_mape").loc[PLANTS, model_order]
     pivot_rmse = all_metrics.pivot(index="plant", columns="model", values="test_rmse").loc[PLANTS, model_order]
+    evaluation_type = ", ".join(sorted(set(all_metrics["evaluation_type"].astype(str))))
 
     for fig_num, pivot, metric, ylabel, filename in [
         (22, pivot_mape, "Testing MAPE", "MAPE (%)", "testing_mape_model_comparison.png"),
         (23, pivot_rmse, "Testing RMSE", "RMSE (MW)", "testing_rmse_model_comparison.png"),
     ]:
         ax = pivot.rename(index=PLANT_LABELS).plot(kind="bar", figsize=(10, 5), width=0.78)
-        ax.set_title(f"Figure 4.{fig_num}: {metric} Model Comparison")
+        ax.set_title(f"Figure 4.{fig_num}: {metric} Model Comparison ({evaluation_type})")
         ax.set_xlabel("Plant")
         ax.set_ylabel(ylabel)
         ax.grid(True, axis="y", alpha=0.25)
@@ -345,7 +514,7 @@ def generate_day_ahead_forecast_figure():
     plt.figure(figsize=(11, 5))
     for df in forecasts:
         plt.plot(df["datetime"], df["Total_Cascade_Generation_MW"], marker="o", linewidth=1.5, markersize=3, label=df["model"].iloc[0])
-    plt.title("Figure 4.32: Total Cascade Day-Ahead Forecast with Benchmarks")
+    plt.title("Figure 4.32: Total Cascade Day-Ahead Forecast with Benchmarks (rolling 24h day-ahead)")
     plt.xlabel("Datetime")
     plt.ylabel("Total Cascade Generation (MW)")
     plt.grid(True, alpha=0.25)
@@ -361,11 +530,31 @@ def generate_day_ahead_forecast_figure():
 def write_rbfnn_daily_metrics(split):
     frames = []
     source_dir = METADATA_DIR / f"{split}_metrics"
-    for plant in PLANTS:
-        path = require_file(source_dir / f"{plant}_{split}_daily_metrics.xlsx")
-        df = pd.read_excel(path)
-        df.insert(1, "plant", plant)
-        frames.append(df[["date", "plant", "operational_mape", "mae", "rmse", "samples"]])
+    expected_paths = [source_dir / f"{plant}_{split}_daily_metrics.xlsx" for plant in PLANTS]
+    if source_dir.exists() and all(path.exists() for path in expected_paths):
+        for plant in PLANTS:
+            path = require_file(source_dir / f"{plant}_{split}_daily_metrics.xlsx")
+            df = pd.read_excel(path)
+            df.insert(1, "plant", plant)
+            frames.append(df[["date", "plant", "operational_mape", "mae", "rmse", "samples"]])
+    else:
+        pred_path = require_file(DAY_AHEAD_BACKTEST_DIR / f"rbfnn_{split}_day_ahead_predictions.xlsx")
+        predictions = pd.read_excel(pred_path)
+        predictions["date"] = pd.to_datetime(predictions["datetime"]).dt.date
+        for (plant, date), group in predictions.groupby(["plant", "date"], sort=False):
+            actual = group["actual_generation"].astype(float)
+            pred = group["predicted_generation"].astype(float)
+            threshold = max(1.0, 0.01 * CAPACITY_MW[str(plant)])
+            mask = actual.abs() >= threshold
+            operational_mape = np.nan if not mask.any() else float(((actual[mask] - pred[mask]).abs() / actual[mask].abs()).mean() * 100.0)
+            frames.append(pd.DataFrame([{
+                "date": date,
+                "plant": plant,
+                "operational_mape": operational_mape,
+                "mae": float((actual - pred).abs().mean()),
+                "rmse": float(np.sqrt(np.mean(np.square(actual - pred)))),
+                "samples": int(len(group)),
+            }]))
     combined = pd.concat(frames, ignore_index=True)
     combined["plant"] = pd.Categorical(combined["plant"], categories=PLANTS, ordered=True)
     combined = combined.sort_values(["plant", "date"]).reset_index(drop=True)
@@ -391,11 +580,40 @@ def write_model_metadata():
         save_excel(predictions, spec["folder"] / "testing_predictions.xlsx")
 
 
+def write_hydrologic_input_metadata():
+    cleaned = read_cleaned_data()
+    rows = [
+        {
+            "variable": "rainfall",
+            "label": "Rainfall (daily-derived hourly-equivalent hydrologic context variable)",
+            "included_in_cleaned_dataset": "rainfall" in cleaned.columns,
+            "numeric": bool("rainfall" in cleaned.columns and pd.api.types.is_numeric_dtype(cleaned["rainfall"])),
+            "daily_derived_hourly_equivalent": True,
+            "true_hourly_sensor_measurement": False,
+            "divided_by_24_again": False,
+            "available_for_feature_engineering": "rainfall" in cleaned.columns,
+            "feature_use": "lagged hydrologic context only",
+        },
+        {
+            "variable": "lake_lanao_outflow",
+            "label": "Lake Lanao outflow (hydrologic context variable)",
+            "included_in_cleaned_dataset": "lake_lanao_outflow" in cleaned.columns,
+            "numeric": bool("lake_lanao_outflow" in cleaned.columns and pd.api.types.is_numeric_dtype(cleaned["lake_lanao_outflow"])),
+            "daily_derived_hourly_equivalent": True,
+            "true_hourly_sensor_measurement": False,
+            "divided_by_24_again": False,
+            "available_for_feature_engineering": "lake_lanao_outflow" in cleaned.columns,
+            "feature_use": "lagged hydrologic context only",
+        },
+    ]
+    save_excel(pd.DataFrame(rows), METADATA_DIR / "overall_comparison" / "hydrologic_input_metadata.xlsx")
+
+
 # Writes overall model comparison and best-model summary workbooks.
 def write_overall_comparison():
     validation_frames = []
     testing_frames = []
-    for model_name in MODEL_FILES:
+    for model_name in DAY_AHEAD_MODEL_FILES:
         metrics = read_metrics(model_name)
         validation, testing = normalized_metric_frames(metrics, model_name)
         validation["split"] = "validation"
@@ -421,14 +639,65 @@ def write_overall_comparison():
 
     overall_dir = METADATA_DIR / "overall_comparison"
     save_excel(combined, overall_dir / "model_average_validation_testing_comparison.xlsx")
+    save_excel(combined, overall_dir / "model_comparison_summary.xlsx")
     save_excel(testing_comparison, overall_dir / "plant_level_testing_comparison.xlsx")
     save_excel(best, overall_dir / "best_model_summary.xlsx")
+    update_model_selection_audit_with_comparison(combined)
+
+
+def update_model_selection_audit_with_comparison(combined):
+    audit_path = OVERALL_METRICS_DIR / "model_selection_audit.json"
+    audit = {}
+    if audit_path.exists():
+        audit = json.loads(audit_path.read_text())
+
+    testing = combined[combined["split"] == "testing"].copy()
+    comparisons = []
+    for plant in PLANTS:
+        plant_df = testing[testing["plant"].astype(str) == plant]
+        rbfnn = plant_df[plant_df["model"] == "RBFNN"]
+        if rbfnn.empty:
+            continue
+        rbfnn_row = rbfnn.iloc[0]
+        for benchmark in ["Random Forest", "XGBoost"]:
+            bench = plant_df[plant_df["model"] == benchmark]
+            if bench.empty:
+                continue
+            bench_row = bench.iloc[0]
+            comparisons.append({
+                "plant": plant,
+                "benchmark": benchmark,
+                "rbfnn_test_mape": float(rbfnn_row["MAPE"]),
+                "benchmark_test_mape": float(bench_row["MAPE"]),
+                "rbfnn_test_mae": float(rbfnn_row["MAE"]),
+                "benchmark_test_mae": float(bench_row["MAE"]),
+                "rbfnn_test_rmse": float(rbfnn_row["RMSE"]),
+                "benchmark_test_rmse": float(bench_row["RMSE"]),
+                "rbfnn_test_r2": float(rbfnn_row["R2"]),
+                "benchmark_test_r2": float(bench_row["R2"]),
+                "rbfnn_won_mape": bool(rbfnn_row["MAPE"] < bench_row["MAPE"]),
+                "rbfnn_won_mae": bool(rbfnn_row["MAE"] < bench_row["MAE"]),
+                "rbfnn_won_rmse": bool(rbfnn_row["RMSE"] < bench_row["RMSE"]),
+                "rbfnn_won_r2": bool(rbfnn_row["R2"] > bench_row["R2"]),
+            })
+
+    audit["rbfnn_vs_benchmarks"] = comparisons
+    audit.setdefault("controls", {})
+    audit["controls"].update({
+        "benchmark_reporting": "Benchmarks are reported honestly even when they outperform RBFNN on a plant or metric.",
+        "comparison_metric_source": "metadata/overall_comparison/model_comparison_summary.xlsx",
+    })
+    audit_path.write_text(json.dumps(audit, indent=2, default=str))
+    print("Saved:", audit_path)
 
 
 # Writes fair rolling 24-hour day-ahead comparison tables for all models.
 def write_day_ahead_backtest_comparison():
-    if not all(path.exists() for spec in DAY_AHEAD_MODEL_FILES.values() for path in spec.values()):
-        print("Day-ahead backtest files incomplete; run Cell 2 and Cell 3 with day-ahead backtest enabled before Cell 4 comparison.")
+    missing = [path for spec in DAY_AHEAD_MODEL_FILES.values() for path in spec.values() if not path.exists()]
+    if missing:
+        warning = "Day-ahead backtest files incomplete; missing: " + ", ".join(str(path) for path in missing)
+        warnings.warn(warning)
+        print("WARNING:", warning)
         return
 
     comparisons = {}
@@ -460,7 +729,7 @@ def main():
     generate_error_analysis_figures()
     generate_benchmark_comparison_figures()
     generate_day_ahead_forecast_figure()
-    write_model_metadata()
+    write_hydrologic_input_metadata()
     write_overall_comparison()
     write_day_ahead_backtest_comparison()
     print("DONE: Thesis figures and organized metadata files generated successfully.")

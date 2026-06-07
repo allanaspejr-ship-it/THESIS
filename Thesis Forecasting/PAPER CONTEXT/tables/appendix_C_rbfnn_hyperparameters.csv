@@ -1,7 +1,7 @@
 Plant,Feature Count,RBF Centers,Learning Rate,Epochs,Batch Size,Shrinkage,Bias Correction,Extra Calibration,Optimizer,Loss Function
-Agus 1,158,80,0.001,80,32,1.15,Yes (-0.005794 MW),Bin calibration,Adam,Mean Squared Error
-Agus 2,169,120,0.0005,80,32,1.15,Yes (0.002722 MW),None specified,Adam,Mean Squared Error
-Agus 4,169,180,0.0005,80,32,1.15,Yes (0.001869 MW),None specified,Adam,Mean Squared Error
-Agus 5,168,180,0.001,80,32,1.15,Yes (-0.013115 MW),Bin calibration and hourly residual correction,Adam,Mean Squared Error
-Agus 6,171,80,0.0005,80,32,1.15,Yes (-0.008944 MW),None specified,Adam,Mean Squared Error
-Agus 7,168,120,0.001,80,32,1.15,Yes (0.007462 MW),Hourly residual correction,Adam,Mean Squared Error
+Agus 1,203,80,0.001,80,32,0.75,Yes (0.043468 MW),Bin calibration,Adam,Mean Squared Error
+Agus 2,234,120,0.0007,80,32,1.15,Yes (0.008800 MW),None specified,Adam,Mean Squared Error
+Agus 4,234,180,0.0005,80,32,1.15,Yes (0.002246 MW),None specified,Adam,Mean Squared Error
+Agus 5,213,180,0.0003,80,32,1.15,Yes (-0.020561 MW),Bin calibration and hourly residual correction,Adam,Mean Squared Error
+Agus 6,276,60,0.001,80,32,0.2,Yes (-0.007211 MW),None specified,Adam,Mean Squared Error
+Agus 7,213,120,0.0003,80,32,1.0,Yes (0.007701 MW),Hourly residual correction,Adam,Mean Squared Error

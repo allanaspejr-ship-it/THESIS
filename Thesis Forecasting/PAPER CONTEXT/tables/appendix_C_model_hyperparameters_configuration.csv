@@ -1,61 +1,61 @@
 Model,Scope,Parameter,Value,Purpose,Source File
-RBFNN,Agus 1,Feature Count,158,Number of input features used by the plant model.,models/rbfnn/meta_agus1.json
+RBFNN,Agus 1,Feature Count,203,Number of input features used by the plant model.,models/rbfnn/meta_agus1.json
 RBFNN,Agus 1,RBF Centers,80,Selected number of radial basis centers.,models/rbfnn/meta_agus1.json
 RBFNN,Agus 1,Learning Rate,0.001,Adam optimizer learning rate selected during validation tuning.,models/rbfnn/meta_agus1.json
 RBFNN,Agus 1,Epochs,80,Maximum training epochs used by the RBFNN training script.,scripts/cell2_rbfnn.py
 RBFNN,Agus 1,Batch Size,32,Mini-batch size used during model fitting.,scripts/cell2_rbfnn.py
-RBFNN,Agus 1,Shrinkage,1.15,Validation-selected shrinkage applied to residual forecasts.,models/rbfnn/meta_agus1.json
-RBFNN,Agus 1,Bias Correction,Yes (-0.005794 MW),Bias correction applied during level prediction.,models/rbfnn/meta_agus1.json
+RBFNN,Agus 1,Shrinkage,0.75,Validation-selected shrinkage applied to residual forecasts.,models/rbfnn/meta_agus1.json
+RBFNN,Agus 1,Bias Correction,Yes (0.043468 MW),Bias correction applied during level prediction.,models/rbfnn/meta_agus1.json
 RBFNN,Agus 1,Extra Calibration,Bin calibration,Additional calibration noted for the selected plant configuration.,thesis appendix configuration
 RBFNN,Agus 1,Optimizer,Adam,Optimizer used to train the neural network.,scripts/cell2_rbfnn.py
 RBFNN,Agus 1,Loss Function,Mean Squared Error,Training loss used for model fitting.,scripts/cell2_rbfnn.py
-RBFNN,Agus 2,Feature Count,169,Number of input features used by the plant model.,models/rbfnn/meta_agus2.json
+RBFNN,Agus 2,Feature Count,234,Number of input features used by the plant model.,models/rbfnn/meta_agus2.json
 RBFNN,Agus 2,RBF Centers,120,Selected number of radial basis centers.,models/rbfnn/meta_agus2.json
-RBFNN,Agus 2,Learning Rate,0.0005,Adam optimizer learning rate selected during validation tuning.,models/rbfnn/meta_agus2.json
+RBFNN,Agus 2,Learning Rate,0.0007,Adam optimizer learning rate selected during validation tuning.,models/rbfnn/meta_agus2.json
 RBFNN,Agus 2,Epochs,80,Maximum training epochs used by the RBFNN training script.,scripts/cell2_rbfnn.py
 RBFNN,Agus 2,Batch Size,32,Mini-batch size used during model fitting.,scripts/cell2_rbfnn.py
 RBFNN,Agus 2,Shrinkage,1.15,Validation-selected shrinkage applied to residual forecasts.,models/rbfnn/meta_agus2.json
-RBFNN,Agus 2,Bias Correction,Yes (0.002722 MW),Bias correction applied during level prediction.,models/rbfnn/meta_agus2.json
+RBFNN,Agus 2,Bias Correction,Yes (0.008800 MW),Bias correction applied during level prediction.,models/rbfnn/meta_agus2.json
 RBFNN,Agus 2,Extra Calibration,None specified,Additional calibration noted for the selected plant configuration.,thesis appendix configuration
 RBFNN,Agus 2,Optimizer,Adam,Optimizer used to train the neural network.,scripts/cell2_rbfnn.py
 RBFNN,Agus 2,Loss Function,Mean Squared Error,Training loss used for model fitting.,scripts/cell2_rbfnn.py
-RBFNN,Agus 4,Feature Count,169,Number of input features used by the plant model.,models/rbfnn/meta_agus4.json
+RBFNN,Agus 4,Feature Count,234,Number of input features used by the plant model.,models/rbfnn/meta_agus4.json
 RBFNN,Agus 4,RBF Centers,180,Selected number of radial basis centers.,models/rbfnn/meta_agus4.json
 RBFNN,Agus 4,Learning Rate,0.0005,Adam optimizer learning rate selected during validation tuning.,models/rbfnn/meta_agus4.json
 RBFNN,Agus 4,Epochs,80,Maximum training epochs used by the RBFNN training script.,scripts/cell2_rbfnn.py
 RBFNN,Agus 4,Batch Size,32,Mini-batch size used during model fitting.,scripts/cell2_rbfnn.py
 RBFNN,Agus 4,Shrinkage,1.15,Validation-selected shrinkage applied to residual forecasts.,models/rbfnn/meta_agus4.json
-RBFNN,Agus 4,Bias Correction,Yes (0.001869 MW),Bias correction applied during level prediction.,models/rbfnn/meta_agus4.json
+RBFNN,Agus 4,Bias Correction,Yes (0.002246 MW),Bias correction applied during level prediction.,models/rbfnn/meta_agus4.json
 RBFNN,Agus 4,Extra Calibration,None specified,Additional calibration noted for the selected plant configuration.,thesis appendix configuration
 RBFNN,Agus 4,Optimizer,Adam,Optimizer used to train the neural network.,scripts/cell2_rbfnn.py
 RBFNN,Agus 4,Loss Function,Mean Squared Error,Training loss used for model fitting.,scripts/cell2_rbfnn.py
-RBFNN,Agus 5,Feature Count,168,Number of input features used by the plant model.,models/rbfnn/meta_agus5.json
+RBFNN,Agus 5,Feature Count,213,Number of input features used by the plant model.,models/rbfnn/meta_agus5.json
 RBFNN,Agus 5,RBF Centers,180,Selected number of radial basis centers.,models/rbfnn/meta_agus5.json
-RBFNN,Agus 5,Learning Rate,0.001,Adam optimizer learning rate selected during validation tuning.,models/rbfnn/meta_agus5.json
+RBFNN,Agus 5,Learning Rate,0.0003,Adam optimizer learning rate selected during validation tuning.,models/rbfnn/meta_agus5.json
 RBFNN,Agus 5,Epochs,80,Maximum training epochs used by the RBFNN training script.,scripts/cell2_rbfnn.py
 RBFNN,Agus 5,Batch Size,32,Mini-batch size used during model fitting.,scripts/cell2_rbfnn.py
 RBFNN,Agus 5,Shrinkage,1.15,Validation-selected shrinkage applied to residual forecasts.,models/rbfnn/meta_agus5.json
-RBFNN,Agus 5,Bias Correction,Yes (-0.013115 MW),Bias correction applied during level prediction.,models/rbfnn/meta_agus5.json
+RBFNN,Agus 5,Bias Correction,Yes (-0.020561 MW),Bias correction applied during level prediction.,models/rbfnn/meta_agus5.json
 RBFNN,Agus 5,Extra Calibration,Bin calibration and hourly residual correction,Additional calibration noted for the selected plant configuration.,thesis appendix configuration
 RBFNN,Agus 5,Optimizer,Adam,Optimizer used to train the neural network.,scripts/cell2_rbfnn.py
 RBFNN,Agus 5,Loss Function,Mean Squared Error,Training loss used for model fitting.,scripts/cell2_rbfnn.py
-RBFNN,Agus 6,Feature Count,171,Number of input features used by the plant model.,models/rbfnn/meta_agus6.json
-RBFNN,Agus 6,RBF Centers,80,Selected number of radial basis centers.,models/rbfnn/meta_agus6.json
-RBFNN,Agus 6,Learning Rate,0.0005,Adam optimizer learning rate selected during validation tuning.,models/rbfnn/meta_agus6.json
+RBFNN,Agus 6,Feature Count,276,Number of input features used by the plant model.,models/rbfnn/meta_agus6.json
+RBFNN,Agus 6,RBF Centers,60,Selected number of radial basis centers.,models/rbfnn/meta_agus6.json
+RBFNN,Agus 6,Learning Rate,0.001,Adam optimizer learning rate selected during validation tuning.,models/rbfnn/meta_agus6.json
 RBFNN,Agus 6,Epochs,80,Maximum training epochs used by the RBFNN training script.,scripts/cell2_rbfnn.py
 RBFNN,Agus 6,Batch Size,32,Mini-batch size used during model fitting.,scripts/cell2_rbfnn.py
-RBFNN,Agus 6,Shrinkage,1.15,Validation-selected shrinkage applied to residual forecasts.,models/rbfnn/meta_agus6.json
-RBFNN,Agus 6,Bias Correction,Yes (-0.008944 MW),Bias correction applied during level prediction.,models/rbfnn/meta_agus6.json
+RBFNN,Agus 6,Shrinkage,0.2,Validation-selected shrinkage applied to residual forecasts.,models/rbfnn/meta_agus6.json
+RBFNN,Agus 6,Bias Correction,Yes (-0.007211 MW),Bias correction applied during level prediction.,models/rbfnn/meta_agus6.json
 RBFNN,Agus 6,Extra Calibration,None specified,Additional calibration noted for the selected plant configuration.,thesis appendix configuration
 RBFNN,Agus 6,Optimizer,Adam,Optimizer used to train the neural network.,scripts/cell2_rbfnn.py
 RBFNN,Agus 6,Loss Function,Mean Squared Error,Training loss used for model fitting.,scripts/cell2_rbfnn.py
-RBFNN,Agus 7,Feature Count,168,Number of input features used by the plant model.,models/rbfnn/meta_agus7.json
+RBFNN,Agus 7,Feature Count,213,Number of input features used by the plant model.,models/rbfnn/meta_agus7.json
 RBFNN,Agus 7,RBF Centers,120,Selected number of radial basis centers.,models/rbfnn/meta_agus7.json
-RBFNN,Agus 7,Learning Rate,0.001,Adam optimizer learning rate selected during validation tuning.,models/rbfnn/meta_agus7.json
+RBFNN,Agus 7,Learning Rate,0.0003,Adam optimizer learning rate selected during validation tuning.,models/rbfnn/meta_agus7.json
 RBFNN,Agus 7,Epochs,80,Maximum training epochs used by the RBFNN training script.,scripts/cell2_rbfnn.py
 RBFNN,Agus 7,Batch Size,32,Mini-batch size used during model fitting.,scripts/cell2_rbfnn.py
-RBFNN,Agus 7,Shrinkage,1.15,Validation-selected shrinkage applied to residual forecasts.,models/rbfnn/meta_agus7.json
-RBFNN,Agus 7,Bias Correction,Yes (0.007462 MW),Bias correction applied during level prediction.,models/rbfnn/meta_agus7.json
+RBFNN,Agus 7,Shrinkage,1.0,Validation-selected shrinkage applied to residual forecasts.,models/rbfnn/meta_agus7.json
+RBFNN,Agus 7,Bias Correction,Yes (0.007701 MW),Bias correction applied during level prediction.,models/rbfnn/meta_agus7.json
 RBFNN,Agus 7,Extra Calibration,Hourly residual correction,Additional calibration noted for the selected plant configuration.,thesis appendix configuration
 RBFNN,Agus 7,Optimizer,Adam,Optimizer used to train the neural network.,scripts/cell2_rbfnn.py
 RBFNN,Agus 7,Loss Function,Mean Squared Error,Training loss used for model fitting.,scripts/cell2_rbfnn.py

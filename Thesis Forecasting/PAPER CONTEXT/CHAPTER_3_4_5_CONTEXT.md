@@ -301,15 +301,15 @@ The main forecasting model was an optimized RBFNN that predicted next-hour gener
 
 ### Main Findings
 
-The optimized RBFNN achieved the strongest overall testing performance. It had the lowest average testing operational MAPE at 2.519 percent, compared with 5.864 percent for Random Forest and 8.876 percent for XGBoost. It also produced the lowest average testing MAE and RMSE and the highest average testing R2.
+The optimized RBFNN achieved the lowest average testing operational MAPE among the evaluated models, but the benchmark models remained competitive on other metrics. In the current testing summary, the average testing operational MAPE is 2.980 percent for RBFNN, 3.233 percent for Random Forest, and 4.261 percent for XGBoost. Random Forest and XGBoost produced lower RMSE or higher R2 in some comparisons, so the result should be interpreted as metric-dependent rather than a uniform superiority across all error measures.
 
-At plant level, the RBFNN achieved the best testing operational MAPE for AGUS 1, AGUS 2, AGUS 4, AGUS 5, AGUS 6, and AGUS 7. This indicates that the optimized RBFNN generalized better to the final chronological testing period than the benchmark models.
+At plant level, the RBFNN achieved the best testing operational MAPE for AGUS 2, AGUS 4, and AGUS 6. Random Forest achieved the best testing operational MAPE for AGUS 1 and AGUS 5, while XGBoost achieved the best testing operational MAPE for AGUS 7. This indicates that the optimized RBFNN generalized well on several plants, but the benchmark comparison does not support a claim that it dominates all models across all plants.
 
-The strongest RBFNN testing performance was observed in AGUS 4, with a testing operational MAPE of 0.611 percent. AGUS 7 and AGUS 5 had higher testing MAPEs, at 4.209 percent and 4.040 percent respectively, suggesting that these plants may still benefit from further calibration or additional explanatory features.
+The strongest RBFNN testing performance was observed in AGUS 4, with a testing operational MAPE of 0.613 percent. AGUS 7 and AGUS 5 had higher RBFNN testing MAPEs, at 4.223 percent and 4.097 percent respectively, suggesting that these plants may still benefit from further calibration or additional explanatory features.
 
 ### Conclusion Statement Draft
 
-Based on the optimized validation and testing results, the RBFNN model is the most suitable model among the evaluated approaches for short-term hydroelectric generation forecasting in the Agus cascade system. Its residual forecasting design, cascade-aware features, outage-aware inputs, and validation-tuned correction steps allowed it to outperform Random Forest and XGBoost on the testing period across all six plants.
+Based on the optimized validation and testing results, the RBFNN model is a suitable primary model for short-term hydroelectric generation forecasting in the Agus cascade system, particularly when the objective is low average operational MAPE. Its residual forecasting design, cascade-aware features, outage-aware inputs, and validation-tuned correction steps produced strong results, but the comparison with Random Forest and XGBoost should be reported cautiously because benchmark models performed better for selected plants and metrics.
 
 ### Recommendations
 

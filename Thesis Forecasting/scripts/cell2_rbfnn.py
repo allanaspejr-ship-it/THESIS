@@ -57,6 +57,7 @@ VALIDATION_METRICS_DIR = META_DIR / "validation_metrics"
 TESTING_METRICS_DIR = META_DIR / "testing_metrics"
 OVERALL_METRICS_DIR = META_DIR / "overall_metrics"
 DAY_AHEAD_BACKTEST_DIR = META_DIR / "day_ahead_backtest"
+OUTAGE_INFORMED_DIR = META_DIR / "day_ahead_outage_informed"
 TRAINING_HISTORY_DIR = META_DIR / "training_validation_loss"
 DIAGNOSTICS_DIR = OVERALL_METRICS_DIR / "actual_forecast_diagnostics"
 PLOTS_DIR = OVERALL_METRICS_DIR / "plots"
@@ -67,10 +68,9 @@ for folder in [
     RBFNN_FORECAST_DIR,
     MODEL_DIR,
     RBFNN_META_DIR,
-    VALIDATION_METRICS_DIR,
-    TESTING_METRICS_DIR,
     OVERALL_METRICS_DIR,
     DAY_AHEAD_BACKTEST_DIR,
+    OUTAGE_INFORMED_DIR,
     TRAINING_HISTORY_DIR,
     DIAGNOSTICS_DIR,
     PLOTS_DIR,
@@ -130,25 +130,32 @@ EPOCHS = 80
 BATCH_SIZE = 32
 N_CENTERS = 120
 LEARNING_RATE = 0.001
-SEARCH_CENTER_COUNTS = [80, 120, 180]
-SEARCH_LEARNING_RATES = [0.001, 0.0005]
+SEARCH_CENTER_COUNTS = [60, 80, 120, 180]
+SEARCH_LEARNING_RATES = [0.001, 0.0007, 0.0005, 0.0003]
+SEARCH_GAMMA_INITS = [0.5, 1.0, 2.0]
+SEARCH_BATCH_SIZES = [16, 32]
+SEARCH_PATIENCES = [8, 12, 16]
+RBFNN_FINALIST_COUNT = 6
+R2_WEIGHT = 8.0
+NEGATIVE_R2_PENALTY = 25.0
 SHRINKAGE_GRID = [0.05, 0.10, 0.20, 0.35, 0.50, 0.75, 1.00, 1.15]
-BIN_CALIBRATION_PLANTS = {"agus1", "agus5"}
+BIN_CALIBRATION_PLANTS = set(PLANTS)
 BIN_CALIBRATION_QUANTILES = list(range(3, 21))
 BIN_CALIBRATION_QUANTILES_BY_PLANT = {"agus1": list(range(3, 41))}
 BIN_CALIBRATION_SCALES = [round(x, 2) for x in np.arange(0.50, 2.55, 0.05)]
 BIN_CALIBRATION_BASIS = {"agus1": "base_pred", "agus5": "current"}
-SHAPE_OPTIMIZED_PLANTS = {"agus5", "agus7"}
+SHAPE_OPTIMIZED_PLANTS = set(PLANTS)
 PROFILE_BLEND_GRID = [0.0, 0.10, 0.20, 0.30, 0.40, 0.55, 0.70]
 HOURLY_CORRECTION_SCALE_GRID = [0.0, 0.25, 0.50, 0.75, 1.00]
 ACTUAL_NEXT_DAY_PATH = PROJECT_DIR / "july 1, 2025.xlsx"
 FEATURE_HISTORY_WINDOW = 240
 DAY_AHEAD_EVALUATION_TYPE = "rolling_24h_day_ahead_backtest"
-OUTAGE_INPUT_TYPE = "historical_outage_proxy"
+OUTAGE_INPUT_TYPE = "last_known_outage_status_before_forecast_day"
 OUTAGE_INPUT_NOTE = (
-    "Historical unit availability was used only as a retrospective proxy for "
-    "planned outage information during backtesting because archived planned "
-    "outage schedules were unavailable."
+    "Validation/testing day-ahead backtests persist only unit outage/status columns "
+    "from the latest historical row before each forecast day. Same-day actual unit "
+    "outage/status values are not used because archived planned outage schedules "
+    "were unavailable."
 )
 HYDROLOGIC_INPUT_TYPE = "lagged_or_persistence_context"
 HYDROLOGIC_INPUT_NOTE = (
@@ -162,10 +169,7 @@ DAY_AHEAD_THESIS_NOTE = (
     "were reconstructed from historical values and recursive predictions, while "
     "actual forecast-day generation was used only after prediction for metrics."
 )
-FORECAST_PROFILE_BLEND_FALLBACK = {
-    "agus5": {"same_hour_yesterday_weight": 0.70, "source": "forecast_fallback"},
-    "agus7": {"same_hour_yesterday_weight": 0.20, "source": "forecast_fallback"},
-}
+FORECAST_PROFILE_BLEND_FALLBACK = {}
 
 
 # ============================================================
@@ -239,7 +243,8 @@ def save_leakage_audit(per_plant_results):
         "day_ahead_mode": "recursive 24-hour forecasting",
         "future_data_used": False,
         "recursive_forecast_note": "Each forecast hour is appended to the history before building features for the next forecast hour.",
-        "planned_outage_inputs": "planned outage status is read from the 24-hour outage template known before the forecast day",
+        "unit_outage_inputs": "validation/testing use only last-known unit outage/status before each forecast day; same-day actual unit outage/status is excluded",
+        "planned_outage_inputs": "only the operational 24-hour forecast mode may read a planned outage template known before the forecast day",
         "per_plant_feature_audit_results": per_plant_results,
     }
     audit_path.write_text(json.dumps(audit, indent=2))
@@ -268,13 +273,47 @@ def save_rbfnn_calibration_report(rows):
     print("Saved:", report_path)
 
 
+def update_model_selection_audit(section, rows):
+    path = OVERALL_METRICS_DIR / "model_selection_audit.json"
+    audit = {}
+    if path.exists():
+        audit = json.loads(path.read_text())
+    existing_rows = audit.get(section, [])
+    if existing_rows and rows:
+        merged = {
+            (item.get("model"), item.get("plant")): item
+            for item in existing_rows
+        }
+        for item in rows:
+            merged[(item.get("model"), item.get("plant"))] = item
+        audit[section] = list(merged.values())
+    else:
+        audit[section] = rows or existing_rows
+    audit["controls"] = {
+        "split_strategy": "chronological 70/15/15",
+        "primary_model": "RBFNN",
+        "benchmark_models": ["Random Forest", "XGBoost"],
+        "selection_rule": "lowest R2-aware validation score; score penalizes MAPE, RMSE, low R2, and especially negative R2",
+        "day_ahead_selection": "RBFNN finalists are selected with R2-aware rolling 24-hour validation backtests",
+        "testing_used_for_tuning": False,
+        "metric_source": "real model predictions only",
+    }
+    path.write_text(json.dumps(audit, indent=2, default=str))
+    print("Saved:", path)
+
+
 # Saves epoch-by-epoch training and validation loss history.
 def save_training_history(history, plant):
     history_df = pd.DataFrame(history.history)
     history_df.insert(0, "epoch", np.arange(1, len(history_df) + 1))
     history_path = TRAINING_HISTORY_DIR / f"{plant}_training_history.xlsx"
-    history_df.to_excel(history_path, index=False)
-    format_excel(history_path)
+    try:
+        history_df.to_excel(history_path, index=False)
+        format_excel(history_path)
+    except PermissionError:
+        history_path = TRAINING_HISTORY_DIR / f"{plant}_training_history_regenerated.xlsx"
+        history_df.to_excel(history_path, index=False)
+        format_excel(history_path)
     return history_path
 
 
@@ -282,16 +321,16 @@ def save_training_history(history, plant):
 def model_file(name):
     current = MODEL_DIR / name
     current_h5 = current.with_suffix(".h5")
-    if current_h5.exists():
-        return current_h5
     if current.exists():
         return current
+    if current_h5.exists():
+        return current_h5
     legacy = LEGACY_MODEL_DIR / name
     legacy_h5 = legacy.with_suffix(".h5")
-    if legacy_h5.exists():
-        return legacy_h5
     if legacy.exists():
         return legacy
+    if legacy_h5.exists():
+        return legacy_h5
     return current
 
 
@@ -354,9 +393,9 @@ class RBFLayer(tf.keras.layers.Layer):
 
 
 # Builds the RBFNN with an RBF hidden layer and linear output layer.
-def build_model(input_dim, n_centers=N_CENTERS, learning_rate=LEARNING_RATE):
+def build_model(input_dim, n_centers=N_CENTERS, learning_rate=LEARNING_RATE, gamma_init=1.0):
     inputs = tf.keras.Input(shape=(input_dim,))
-    x = RBFLayer(n_centers, gamma_init=1.0)(inputs)
+    x = RBFLayer(n_centers, gamma_init=gamma_init)(inputs)
     outputs = tf.keras.layers.Dense(1, activation="linear")(x)
     model = tf.keras.Model(inputs=inputs, outputs=outputs)
     model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate), loss="mse")
@@ -518,7 +557,12 @@ def feature_columns_for(data, plant):
     cols += [f"{plant}_units_running", f"{plant}_plant_available"]
     cols += [c for c in data.columns if c.startswith(f"tot_{plant}") or c.startswith(f"elev_{plant}") or c.startswith(f"spill_{plant}")]
     cols += [c for c in data.columns if "_lag" in c and (c.startswith("tot_agus") or c.startswith("elev_agus") or "outflow" in c or c.startswith("rainfall"))]
-    return list(dict.fromkeys([c for c in cols if c in data.columns]))
+    selected = list(dict.fromkeys([c for c in cols if c in data.columns]))
+    assert not any(
+        re.fullmatch(r"rainfall|.*outflow.*", c) and "_lag" not in c
+        for c in selected
+    ), "Contemporaneous rainfall/outflow must not be a feature"
+    return selected
 
 
 # ============================================================
@@ -600,11 +644,56 @@ def tune_bin_calibration(plant, current, actual, base_pred):
     return best["calibration"], best["pred"]
 
 
-# Ranks candidate configurations by MAPE, then RMSE and R2.
+# Ranks candidate configurations with a stronger penalty for poor R2.
 def candidate_score(metrics):
     mape = metrics["operational_mape"]
     mape_score = float(mape) if pd.notna(mape) else float("inf")
-    return (mape_score, metrics["rmse"], -metrics["r2"])
+    r2 = float(metrics["r2"]) if pd.notna(metrics["r2"]) else -999.0
+    r2_penalty = max(0.0, -r2) * NEGATIVE_R2_PENALTY
+    combined_score = mape_score + metrics["rmse"] + (1.0 - r2) * R2_WEIGHT + r2_penalty
+    return (combined_score, -r2, mape_score, metrics["rmse"])
+
+
+def rolling_selection_score(plant, metrics):
+    return candidate_score(metrics)
+
+
+def rbfnn_search_configs(plant):
+    base = [
+        {"n_centers": 60, "learning_rate": 0.0010, "gamma_init": 1.0, "batch_size": 32, "patience": 8},
+        {"n_centers": 80, "learning_rate": 0.0010, "gamma_init": 0.5, "batch_size": 32, "patience": 12},
+        {"n_centers": 80, "learning_rate": 0.0007, "gamma_init": 2.0, "batch_size": 16, "patience": 12},
+        {"n_centers": 120, "learning_rate": 0.0010, "gamma_init": 1.0, "batch_size": 32, "patience": 12},
+        {"n_centers": 120, "learning_rate": 0.0007, "gamma_init": 0.5, "batch_size": 16, "patience": 16},
+        {"n_centers": 120, "learning_rate": 0.0005, "gamma_init": 2.0, "batch_size": 32, "patience": 16},
+        {"n_centers": 180, "learning_rate": 0.0005, "gamma_init": 1.0, "batch_size": 32, "patience": 16},
+        {"n_centers": 180, "learning_rate": 0.0003, "gamma_init": 0.5, "batch_size": 16, "patience": 16},
+    ]
+    plant_extra = {
+        "agus1": [
+            {"n_centers": 60, "learning_rate": 0.0007, "gamma_init": 2.0, "batch_size": 16, "patience": 12},
+        ],
+        "agus5": [
+            {"n_centers": 80, "learning_rate": 0.0005, "gamma_init": 0.5, "batch_size": 16, "patience": 16},
+            {"n_centers": 120, "learning_rate": 0.0003, "gamma_init": 1.0, "batch_size": 16, "patience": 16},
+        ],
+        "agus6": [
+            {"n_centers": 180, "learning_rate": 0.0007, "gamma_init": 0.5, "batch_size": 32, "patience": 16},
+        ],
+        "agus7": [
+            {"n_centers": 80, "learning_rate": 0.0005, "gamma_init": 1.0, "batch_size": 16, "patience": 16},
+            {"n_centers": 120, "learning_rate": 0.0003, "gamma_init": 0.5, "batch_size": 16, "patience": 16},
+        ],
+    }
+    configs = base + plant_extra.get(plant, [])
+    unique = []
+    seen = set()
+    for config in configs:
+        key = tuple(sorted(config.items()))
+        if key not in seen:
+            unique.append(config)
+            seen.add(key)
+    return unique
 
 
 # Gets the forecast target hour for each validation or testing row.
@@ -1075,6 +1164,86 @@ def feature_row_from_feature_dict(row, x_cols, date_val, hour_val):
     return pd.DataFrame([{c: row.get(c, 0.0) if pd.notna(row.get(c, 0.0)) else 0.0 for c in x_cols}])
 
 
+def value_at_lag(frame, column, lag, default=0.0):
+    if column not in frame.columns or len(frame) <= lag:
+        return default
+    value = frame[column].iloc[-(lag + 1)]
+    return default if pd.isna(value) else float(value)
+
+
+def latest_value(frame, column, default=0.0):
+    if column not in frame.columns or frame.empty:
+        return default
+    value = frame[column].iloc[-1]
+    return default if pd.isna(value) else float(value)
+
+
+def fast_backtest_feature_row(hist, plant, date_val, hour_val, x_cols):
+    dt = pd.to_datetime(date_val) + pd.Timedelta(hours=int(hour_val) - 1)
+    hour0 = int(hour_val) - 1
+    target = f"total_gen_{plant}"
+    out_cols = [c for c in hist.columns if re.fullmatch(fr"out_{plant}_unit\d+", c)]
+    feature_values = {
+        "hour_sin": np.sin(2 * np.pi * hour0 / 24),
+        "hour_cos": np.cos(2 * np.pi * hour0 / 24),
+        "day_sin": np.sin(2 * np.pi * dt.dayofweek / 7),
+        "day_cos": np.cos(2 * np.pi * dt.dayofweek / 7),
+        "month_sin": np.sin(2 * np.pi * dt.month / 12),
+        "month_cos": np.cos(2 * np.pi * dt.month / 12),
+        "is_weekend": int(dt.dayofweek >= 5),
+        "target_hour_sin": np.sin(2 * np.pi * hour0 / 24),
+        "target_hour_cos": np.cos(2 * np.pi * hour0 / 24),
+        "target_day_sin": np.sin(2 * np.pi * dt.dayofweek / 7),
+        "target_day_cos": np.cos(2 * np.pi * dt.dayofweek / 7),
+        "target_is_weekend": int(dt.dayofweek >= 5),
+        f"{target}_current": latest_value(hist, target),
+        f"{plant}_units_running": sum(latest_value(hist, c, 1.0) for c in out_cols),
+    }
+    feature_values[f"{plant}_plant_available"] = int(feature_values[f"{plant}_units_running"] > 0)
+
+    for col in x_cols:
+        if col in feature_values:
+            continue
+        if col in hist.columns:
+            feature_values[col] = latest_value(hist, col)
+        elif m := re.fullmatch(r"(.+)_lag(\d+)", col):
+            feature_values[col] = value_at_lag(hist, m.group(1), int(m.group(2)))
+        elif m := re.fullmatch(r"(.+)_rollmean(\d+)", col):
+            values = pd.to_numeric(hist[m.group(1)].tail(int(m.group(2))), errors="coerce")
+            feature_values[col] = float(values.mean()) if values.notna().any() else 0.0
+        elif m := re.fullmatch(r"(.+)_rollstd(\d+)", col):
+            values = pd.to_numeric(hist[m.group(1)].tail(int(m.group(2))), errors="coerce")
+            feature_values[col] = float(values.std()) if values.notna().sum() > 1 else 0.0
+        elif m := re.fullmatch(r"(.+)_rollmin(\d+)", col):
+            values = pd.to_numeric(hist[m.group(1)].tail(int(m.group(2))), errors="coerce")
+            feature_values[col] = float(values.min()) if values.notna().any() else 0.0
+        elif m := re.fullmatch(r"(.+)_rollmax(\d+)", col):
+            values = pd.to_numeric(hist[m.group(1)].tail(int(m.group(2))), errors="coerce")
+            feature_values[col] = float(values.max()) if values.notna().any() else 0.0
+        elif m := re.fullmatch(r"(.+)_diff(\d+)", col):
+            base, lag = m.group(1), int(m.group(2))
+            feature_values[col] = latest_value(hist, base) - value_at_lag(hist, base, lag)
+        elif col == f"{target}_target_lag24":
+            feature_values[col] = value_at_lag(hist, target, 23)
+        elif col == f"{target}_target_lag168":
+            feature_values[col] = value_at_lag(hist, target, 167)
+        elif m := re.fullmatch(fr"(gen_{plant}_unit\d+)_share_current", col):
+            total = latest_value(hist, target)
+            feature_values[col] = latest_value(hist, m.group(1)) / total if total else 0.0
+        elif m := re.fullmatch(fr"(gen_{plant}_unit\d+)_share_lag(\d+)", col):
+            total_lag = value_at_lag(hist, target, int(m.group(2)))
+            feature_values[col] = value_at_lag(hist, m.group(1), int(m.group(2))) / total_lag if total_lag else 0.0
+        elif col == f"{plant}_upstream_current" and UPSTREAM_MAP.get(plant):
+            feature_values[col] = latest_value(hist, f"total_gen_{UPSTREAM_MAP[plant]}")
+        elif m := re.fullmatch(fr"{plant}_upstream_gen_lag(\d+)", col):
+            upstream = UPSTREAM_MAP.get(plant)
+            feature_values[col] = value_at_lag(hist, f"total_gen_{upstream}", int(m.group(1))) if upstream else 0.0
+        else:
+            feature_values[col] = 0.0
+
+    return pd.DataFrame([{c: feature_values.get(c, 0.0) for c in x_cols}])
+
+
 # Applies saved shape adjustments during recursive 24-hour forecasting.
 def apply_forecast_shape_adjustments(base_pred, hist, plant, hour_i, meta):
     if plant not in SHAPE_OPTIMIZED_PLANTS:
@@ -1084,9 +1253,9 @@ def apply_forecast_shape_adjustments(base_pred, hist, plant, hour_i, meta):
     hourly = meta.get("hourly_residual_correction")
     if hourly:
         adjusted = float(apply_hourly_correction([adjusted], [hour_i], plant, hourly)[0])
-    profile = meta.get("profile_blend") or FORECAST_PROFILE_BLEND_FALLBACK.get(plant)
-    if profile and len(hist) >= 23:
-        same_hour_yesterday = float(hist[target].iloc[-23])
+    profile = meta.get("day_ahead_profile_blend") or meta.get("profile_blend") or FORECAST_PROFILE_BLEND_FALLBACK.get(plant)
+    if profile and len(hist) > 23:
+        same_hour_yesterday = value_at_lag(hist, target, 23)
         adjusted = float(apply_profile_blend([adjusted], [same_hour_yesterday], plant, profile)[0])
     return adjusted
 
@@ -1175,13 +1344,43 @@ def day_ahead_backtest_days(raw_df):
     }
 
 
-def historical_proxy_outage_plan(actual_day):
+def outage_plan_from_history(history, forecast_day):
+    """Build a leakage-safe unit outage plan from the last row before forecast_day."""
     planned = pd.DataFrame({
-        "Date": pd.to_datetime(actual_day["datetime"]).dt.normalize(),
-        "Hour": pd.to_numeric(actual_day["time"]).astype(int),
-    }).reset_index(drop=True)
+        "Date": [pd.Timestamp(forecast_day).normalize()] * 24,
+        "Hour": list(range(1, 25)),
+    })
+    if history.empty:
+        raise ValueError(f"No historical outage context available before {forecast_day}.")
+    if pd.to_datetime(history["datetime"]).max() >= pd.Timestamp(forecast_day):
+        raise ValueError("Outage history includes forecast-day rows; this would leak same-day unit outage status.")
+    latest = history.iloc[-1]
+    for col in [c for c in history.columns if re.fullmatch(r"out_agus[124567]_unit\d+", c)]:
+        value = pd.to_numeric(pd.Series([latest.get(col, 1)]), errors="coerce").fillna(1).iloc[0]
+        planned[col] = 1 if value > 0 else 0
+    return planned
+
+
+def historical_proxy_outage_plan(actual_day):
+    raise RuntimeError("Do not use same-day actual outage status for validation/testing backtests.")
+
+
+def outage_informed_plan_from_actual_day(actual_day, forecast_day):
+    """Build the supplementary known-availability scenario from recorded unit status."""
+    planned = pd.DataFrame({
+        "Date": [pd.Timestamp(forecast_day).normalize()] * 24,
+        "Hour": list(range(1, 25)),
+    })
+    actual = actual_day.copy()
+    actual["hour_internal"] = pd.to_numeric(actual["time"]).astype(int)
+    actual = actual.set_index("hour_internal")
     for col in [c for c in actual_day.columns if re.fullmatch(r"out_agus[124567]_unit\d+", c)]:
-        planned[col] = np.where(pd.to_numeric(actual_day[col], errors="coerce").fillna(1) > 0, 1, 0)
+        values = []
+        for hour in range(1, 25):
+            value = actual.loc[hour, col] if hour in actual.index else 1
+            value = pd.to_numeric(pd.Series([value]), errors="coerce").fillna(1).iloc[0]
+            values.append(1 if value > 0 else 0)
+        planned[col] = values
     return planned
 
 
@@ -1218,6 +1417,26 @@ def load_rbfnn_backtest_bundle():
     return bundle
 
 
+def warn_if_saved_rbfnn_missing_rainfall_features(raw_df):
+    if "rainfall" not in raw_df.columns:
+        return
+    missing = []
+    for plant in PLANTS:
+        meta_path = model_file(f"meta_{plant}.json")
+        if not meta_path.exists():
+            continue
+        meta = json.loads(meta_path.read_text())
+        features = meta.get("X_cols", [])
+        if not any(str(col).startswith("rainfall_lag") for col in features):
+            missing.append(plant)
+    if missing:
+        print(
+            "WARNING: Rainfall was added to the cleaned feature set. "
+            "Retraining is recommended to ensure the RBFNN uses the updated hydrologic inputs. "
+            f"Saved RBFNN metadata missing rainfall lag features for: {', '.join(missing)}"
+        )
+
+
 def forecast_24h_from_loaded_bundle(history, planned, bundle):
     forecast = empty_forecast_frame(planned)
     hist = history.copy()
@@ -1229,13 +1448,11 @@ def forecast_24h_from_loaded_bundle(history, planned, bundle):
         new_row["date"] = pd.to_datetime(date_i)
         new_row["time"] = hour_i
         new_row["datetime"] = pd.to_datetime(date_i) + pd.Timedelta(hours=hour_i - 1)
-        latest_feature_row = add_features(hist.tail(FEATURE_HISTORY_WINDOW).copy()).iloc[-1].to_dict()
-
         for plant in PLANTS:
             target = f"total_gen_{plant}"
             model_info = bundle[plant]
             meta = model_info["meta"]
-            x_row = feature_row_from_feature_dict(latest_feature_row.copy(), meta["X_cols"], date_i, hour_i)
+            x_row = fast_backtest_feature_row(hist.tail(FEATURE_HISTORY_WINDOW).copy(), plant, date_i, hour_i, meta["X_cols"])
             delta = float(predict_delta(model_info["model"], model_info["x_scaler"], model_info["y_scaler"], x_row)[0])
             last_val = float(hist[target].iloc[-1])
             base_pred = last_val + float(meta["best_shrinkage"]) * delta + float(meta.get("bias_correction_mw", 0.0))
@@ -1263,6 +1480,84 @@ def forecast_24h_from_loaded_bundle(history, planned, bundle):
 
     ordered_cols = ["Date", "Hour"] + UNIT_FORECAST_COLUMNS + TOTAL_FORECAST_COLUMNS + [CASCADE_FORECAST_COLUMN]
     return forecast[ordered_cols]
+
+
+def rolling_plant_day_ahead_predictions(raw_df, forecast_days, plant, model_info):
+    rows = []
+    target = f"total_gen_{plant}"
+    meta = model_info["meta"]
+    for day in forecast_days:
+        actual_day = actual_forecast_day(raw_df, day)
+        if len(actual_day) != 24:
+            continue
+        hist = history_before_forecast_day(raw_df, day)
+        if hist.empty:
+            continue
+        planned = outage_plan_from_history(hist, day)
+
+        for step in range(24):
+            date_i = planned.loc[step, "Date"]
+            hour_i = int(planned.loc[step, "Hour"])
+            dt_val = pd.to_datetime(date_i) + pd.Timedelta(hours=hour_i - 1)
+            new_row = hist.iloc[-1].copy()
+            new_row["date"] = pd.to_datetime(date_i)
+            new_row["time"] = hour_i
+            new_row["datetime"] = dt_val
+
+            x_row = fast_backtest_feature_row(hist.tail(FEATURE_HISTORY_WINDOW).copy(), plant, date_i, hour_i, meta["X_cols"])
+            delta = float(predict_delta(model_info["model"], model_info["x_scaler"], model_info["y_scaler"], x_row)[0])
+            last_val = float(hist[target].iloc[-1])
+            base_pred = last_val + float(meta["best_shrinkage"]) * delta + float(meta.get("bias_correction_mw", 0.0))
+            calibration = meta.get("bin_calibration")
+            calibration_basis = [base_pred] if calibration and calibration.get("basis") == "base_pred" else [last_val]
+            base_pred = float(apply_bin_calibration([base_pred], calibration_basis, plant, calibration)[0])
+            base_pred = apply_forecast_shape_adjustments(base_pred, hist, plant, hour_i, meta)
+            base_pred = float(np.clip(base_pred, last_val - float(meta["ramp_limit"]), last_val + float(meta["ramp_limit"])))
+            base_pred = float(np.clip(base_pred, 0.0, CAPACITY_MW[plant] * 1.05))
+
+            p_status = planned_status(planned, step, plant)
+            max_available = available_capacity(plant, p_status)
+            adjusted = float(np.clip(base_pred, 0.0, max_available)) if max_available > 0 else 0.0
+            unit_values = distribute_to_units(plant, adjusted, p_status, hist, hour_i)
+            for unit_col, value in unit_values.items():
+                new_row[unit_col] = value
+            predicted = float(sum(unit_values.values()))
+            new_row[target] = predicted
+            for out_col, value in p_status.items():
+                new_row[out_col] = value
+
+            rows.append({
+                "forecast_date": pd.Timestamp(day).date(),
+                "forecast_hour": hour_i,
+                "datetime": dt_val,
+                "plant": plant,
+                "actual_generation": float(actual_day.loc[actual_day["datetime"] == dt_val, target].iloc[0]),
+                "predicted_generation": predicted,
+                "model": "RBFNN",
+                "evaluation_type": DAY_AHEAD_EVALUATION_TYPE,
+            })
+            hist = pd.concat([hist, pd.DataFrame([new_row])], ignore_index=True)
+    return pd.DataFrame(rows)
+
+
+def rolling_candidate_score(raw_df, forecast_days, plant, model_info):
+    predictions = rolling_plant_day_ahead_predictions(raw_df, forecast_days, plant, model_info)
+    if predictions.empty:
+        return (float("inf"), float("inf"), float("inf")), {}
+    mape, mae, rmse, r2 = day_ahead_metric_values(
+        predictions["actual_generation"],
+        predictions["predicted_generation"],
+        plant,
+    )
+    metrics_out = {
+        "operational_mape": mape,
+        "mae": mae,
+        "rmse": rmse,
+        "r2": r2,
+        "forecast_days": int(predictions["forecast_date"].nunique()),
+        "forecast_hours": int(len(predictions)),
+    }
+    return rolling_selection_score(plant, metrics_out), metrics_out
 
 
 def day_ahead_prediction_rows(model_name, forecast_day, actual_day, forecast):
@@ -1295,16 +1590,30 @@ def day_ahead_metric_values(y_true, y_pred, plant):
     return mape, mae, rmse, r2
 
 
+def day_ahead_mape_counts(y_true, plant):
+    y_true = np.asarray(y_true, dtype=float)
+    mask = np.abs(y_true) >= operational_threshold(plant)
+    included = int(mask.sum())
+    excluded = int(len(mask) - included)
+    excluded_fraction = float(excluded / len(mask)) if len(mask) else np.nan
+    return included, excluded, excluded_fraction
+
+
 def day_ahead_metrics_frame(predictions, model_name):
     rows = []
     df = pd.DataFrame(predictions)
     for plant, group in df.groupby("plant", sort=False):
         mape, mae, rmse, r2 = day_ahead_metric_values(group["actual_generation"], group["predicted_generation"], plant)
+        included, excluded, excluded_fraction = day_ahead_mape_counts(group["actual_generation"], plant)
         rows.append({
             "model": model_name,
             "plant": plant,
             "number_of_forecast_days": int(group["forecast_date"].nunique()),
             "number_of_forecast_hours": int(len(group)),
+            "mape_rows_included": included,
+            "mape_rows_excluded": excluded,
+            "mape_rows_excluded_fraction": excluded_fraction,
+            "low_load_regime": bool(excluded_fraction > 0.40),
             "operational_mape": mape,
             "mae": mae,
             "rmse": rmse,
@@ -1314,6 +1623,39 @@ def day_ahead_metrics_frame(predictions, model_name):
             "evaluation_type": DAY_AHEAD_EVALUATION_TYPE,
         })
     return pd.DataFrame(rows)
+
+
+def day_ahead_summary_frame(validation_metrics, testing_metrics, feature_counts):
+    validation = validation_metrics.rename(
+        columns={
+            "operational_mape": "val_operational_mape",
+            "mae": "val_mae",
+            "rmse": "val_rmse",
+            "r2": "val_r2",
+        }
+    )
+    testing = testing_metrics.rename(
+        columns={
+            "operational_mape": "test_operational_mape",
+            "mae": "test_mae",
+            "rmse": "test_rmse",
+            "r2": "test_r2",
+        }
+    )
+    summary = validation[["model", "plant", "val_operational_mape", "val_mae", "val_rmse", "val_r2"]].merge(
+        testing[["plant", "test_operational_mape", "test_mae", "test_rmse", "test_r2"]],
+        on="plant",
+        how="inner",
+    )
+    summary["feature_count"] = summary["plant"].map(feature_counts).astype(int)
+    return summary[METRICS_COLUMNS]
+
+
+def testing_prediction_export(predictions):
+    out = predictions.copy()
+    out["Date"] = pd.to_datetime(out["datetime"]).dt.date
+    out["Hour"] = pd.to_numeric(out["forecast_hour"]).astype(int)
+    return out[TESTING_PREDICTION_COLUMNS]
 
 
 def save_day_ahead_backtest_metadata(raw_df, split_days):
@@ -1330,6 +1672,8 @@ def save_day_ahead_backtest_metadata(raw_df, split_days):
         "data_end": str(raw_df["datetime"].max()),
         "outage_input_type": OUTAGE_INPUT_TYPE,
         "outage_input_note": OUTAGE_INPUT_NOTE,
+        "unit_outage_status_rule": "For validation/testing, each 24-hour forecast day receives only the last-known out_agus*_unit* values from before 00:00 of that day.",
+        "same_day_actual_unit_outage_used": False,
         "hydrologic_input_type": HYDROLOGIC_INPUT_TYPE,
         "hydrologic_input_note": HYDROLOGIC_INPUT_NOTE,
         "scaling_and_model_fitting_control": "RBFNN scalers and model weights are fitted on the training split only; saved training-fitted scalers are reused for validation/testing backtests.",
@@ -1347,6 +1691,9 @@ def save_rbfnn_day_ahead_backtest(raw_df):
     print("Forecast-day actual generation values are used only for scoring, not as inputs.")
     split_days = day_ahead_backtest_days(raw_df)
     bundle = load_rbfnn_backtest_bundle()
+    feature_counts = {plant: len(bundle[plant]["meta"]["X_cols"]) for plant in PLANTS}
+    split_metrics = {}
+    split_predictions = {}
 
     for split_name, days in split_days.items():
         rows = []
@@ -1356,12 +1703,14 @@ def save_rbfnn_day_ahead_backtest(raw_df):
             if len(actual_day) != 24:
                 continue
             hist = history_before_forecast_day(raw_df, day)
-            planned = historical_proxy_outage_plan(actual_day)
+            planned = outage_plan_from_history(hist, day)
             forecast = forecast_24h_from_loaded_bundle(hist, planned, bundle)
             rows.extend(day_ahead_prediction_rows("RBFNN", day, actual_day, forecast))
 
         pred_df = pd.DataFrame(rows)
         metrics_df = day_ahead_metrics_frame(rows, "RBFNN") if rows else pd.DataFrame()
+        split_predictions[split_name] = pred_df
+        split_metrics[split_name] = metrics_df
         pred_path = DAY_AHEAD_BACKTEST_DIR / f"rbfnn_{split_name}_day_ahead_predictions.xlsx"
         metrics_path = DAY_AHEAD_BACKTEST_DIR / f"rbfnn_{split_name}_day_ahead_metrics.xlsx"
         pred_df.to_excel(pred_path, index=False)
@@ -1371,8 +1720,214 @@ def save_rbfnn_day_ahead_backtest(raw_df):
         print("Saved:", pred_path)
         print("Saved:", metrics_path)
 
+    if {"validation", "testing"}.issubset(split_metrics):
+        metrics_path = OVERALL_METRICS_DIR / "rbfnn_validation_testing_metrics.xlsx"
+        summary = day_ahead_summary_frame(split_metrics["validation"], split_metrics["testing"], feature_counts)
+        summary.to_excel(metrics_path, index=False)
+        format_excel(metrics_path)
+        print("Saved:", metrics_path)
+
+    if "testing" in split_predictions and not split_predictions["testing"].empty:
+        predictions_path = OVERALL_METRICS_DIR / "rbfnn_testing_predictions.xlsx"
+        testing_prediction_export(split_predictions["testing"]).to_excel(predictions_path, index=False)
+        format_excel(predictions_path)
+        print("Saved:", predictions_path)
+
     save_day_ahead_backtest_metadata(raw_df, split_days)
     print("Saved RBFNN rolling day-ahead backtest predictions and metrics.")
+
+
+def save_rbfnn_outage_informed_backtest(raw_df):
+    scenario_type = "supplementary_outage_informed_backtest"
+    outage_type = "actual_forecast_day_unit_status_proxy_for_known_planned_availability"
+    scenario_note = (
+        "Uses recorded forecast-day unit outage/status as a proxy for perfectly known "
+        "planned unit availability. This is not the primary leakage-free day-ahead "
+        "result; it is a sensitivity scenario showing performance when operators "
+        "provide forecast-day unit availability before issuing the forecast."
+    )
+    print("Running supplementary outage-informed 24-hour RBFNN backtest...")
+    print("This is a scenario analysis, not the primary leakage-free day-ahead result.")
+    split_days = day_ahead_backtest_days(raw_df)
+    bundle = load_rbfnn_backtest_bundle()
+    feature_counts = {plant: len(bundle[plant]["meta"]["X_cols"]) for plant in PLANTS}
+    split_metrics = {}
+    split_predictions = {}
+
+    for split_name, days in split_days.items():
+        rows = []
+        print(f"RBFNN outage-informed {split_name} days: {len(days)}")
+        for day in days:
+            actual_day = actual_forecast_day(raw_df, day)
+            if len(actual_day) != 24:
+                continue
+            hist = history_before_forecast_day(raw_df, day)
+            if hist.empty:
+                continue
+            planned = outage_informed_plan_from_actual_day(actual_day, day)
+            forecast = forecast_24h_from_loaded_bundle(hist, planned, bundle)
+            rows.extend(day_ahead_prediction_rows("RBFNN", day, actual_day, forecast))
+
+        pred_df = pd.DataFrame(rows)
+        if not pred_df.empty:
+            pred_df["evaluation_type"] = scenario_type
+            pred_df["outage_input_type"] = outage_type
+        metrics_df = day_ahead_metrics_frame(rows, "RBFNN") if rows else pd.DataFrame()
+        if not metrics_df.empty:
+            metrics_df["evaluation_type"] = scenario_type
+            metrics_df["outage_input_type"] = outage_type
+        split_predictions[split_name] = pred_df
+        split_metrics[split_name] = metrics_df
+
+        pred_path = OUTAGE_INFORMED_DIR / f"rbfnn_{split_name}_outage_informed_predictions.xlsx"
+        metrics_path = OUTAGE_INFORMED_DIR / f"rbfnn_{split_name}_outage_informed_metrics.xlsx"
+        pred_df.to_excel(pred_path, index=False)
+        metrics_df.to_excel(metrics_path, index=False)
+        format_excel(pred_path)
+        format_excel(metrics_path)
+        print("Saved:", pred_path)
+        print("Saved:", metrics_path)
+
+    if {"validation", "testing"}.issubset(split_metrics):
+        summary = day_ahead_summary_frame(split_metrics["validation"], split_metrics["testing"], feature_counts)
+        summary_path = OUTAGE_INFORMED_DIR / "rbfnn_outage_informed_validation_testing_metrics.xlsx"
+        summary.to_excel(summary_path, index=False)
+        format_excel(summary_path)
+        print("Saved:", summary_path)
+
+    metadata = {
+        "evaluation_type": scenario_type,
+        "scenario_role": "supplementary sensitivity analysis, not primary leakage-free day-ahead backtest",
+        "model": "RBFNN",
+        "outage_input_type": outage_type,
+        "same_day_actual_unit_outage_used": True,
+        "testing_used_for_training_or_tuning": False,
+        "defense_note": scenario_note,
+        "primary_leakage_free_results_remain_in": "metadata/day_ahead_backtest and metadata/overall_metrics",
+        "validation_forecast_days": len(split_days["validation"]),
+        "testing_forecast_days": len(split_days["testing"]),
+    }
+    metadata_path = OUTAGE_INFORMED_DIR / "rbfnn_outage_informed_metadata.json"
+    metadata_path.write_text(json.dumps(metadata, indent=2))
+    print("Saved:", metadata_path)
+
+
+def save_loaded_rbfnn_selection_audit():
+    metrics_path = OVERALL_METRICS_DIR / "rbfnn_validation_testing_metrics.xlsx"
+    metrics_df = pd.read_excel(metrics_path) if metrics_path.exists() else pd.DataFrame()
+    rows = []
+    for plant in PLANTS:
+        meta = json.loads(model_file(f"meta_{plant}.json").read_text())
+        metrics_row = {}
+        if not metrics_df.empty:
+            match = metrics_df[metrics_df["plant"] == plant]
+            if not match.empty:
+                metrics_row = match.iloc[0].to_dict()
+        rows.append({
+            "plant": plant,
+            "model": "RBFNN",
+            "feature_count": len(meta.get("X_cols", [])),
+            "selected_hyperparameters": {
+                "centers": meta.get("selected_centers"),
+                "learning_rate": meta.get("selected_learning_rate"),
+                "gamma_init": meta.get("selected_gamma_init"),
+                "batch_size": meta.get("selected_batch_size"),
+                "early_stopping_patience": meta.get("selected_patience"),
+                "shrinkage": meta.get("best_shrinkage"),
+            },
+            "calibration": {
+                "bin_calibration": bool(meta.get("bin_calibration")),
+                "hourly_residual_correction": bool(meta.get("hourly_residual_correction")),
+                "profile_blend": bool(meta.get("profile_blend")),
+                "ramp_limit": meta.get("ramp_limit"),
+            },
+            "validation_score_used_for_selection": {
+                "operational_mape": metrics_row.get("val_operational_mape"),
+                "rmse": metrics_row.get("val_rmse"),
+                "r2": metrics_row.get("val_r2"),
+            },
+            "testing_score_after_final_evaluation": {
+                "operational_mape": metrics_row.get("test_operational_mape"),
+                "mae": metrics_row.get("test_mae"),
+                "rmse": metrics_row.get("test_rmse"),
+                "r2": metrics_row.get("test_r2"),
+            },
+            "selection_source": "saved optimized RBFNN metadata",
+            "testing_used_for_selection_or_calibration": False,
+        })
+    update_model_selection_audit("rbfnn", rows)
+
+
+def tune_saved_day_ahead_profile_blends(raw_df):
+    print("Tuning RBFNN day-ahead profile blends on validation predictions only...")
+    validation_path = DAY_AHEAD_BACKTEST_DIR / "rbfnn_validation_day_ahead_predictions.xlsx"
+    if not validation_path.exists():
+        save_rbfnn_day_ahead_backtest(raw_df)
+    validation = pd.read_excel(validation_path)
+    validation["datetime"] = pd.to_datetime(validation["datetime"])
+    history = raw_df.copy()
+    history["datetime"] = pd.to_datetime(history["datetime"])
+    rows = []
+
+    for plant in PLANTS:
+        target = f"total_gen_{plant}"
+        plant_val = validation[validation["plant"] == plant].copy()
+        anchor_source = history[["datetime", target]].copy()
+        anchor_source["datetime"] = anchor_source["datetime"] + pd.Timedelta(days=1)
+        anchor_source = anchor_source.rename(columns={target: "same_hour_yesterday"})
+        plant_val = plant_val.merge(anchor_source, on="datetime", how="left").dropna(subset=["same_hour_yesterday"])
+        if plant_val.empty:
+            continue
+
+        actual = plant_val["actual_generation"].values.astype(float)
+        base_pred = plant_val["predicted_generation"].values.astype(float)
+        anchor = plant_val["same_hour_yesterday"].values.astype(float)
+        base_metrics = {
+            "operational_mape": day_ahead_metric_values(actual, base_pred, plant)[0],
+            "mae": day_ahead_metric_values(actual, base_pred, plant)[1],
+            "rmse": day_ahead_metric_values(actual, base_pred, plant)[2],
+            "r2": day_ahead_metric_values(actual, base_pred, plant)[3],
+        }
+        best = {"score": rolling_selection_score(plant, base_metrics), "weight": 0.0, "metrics": base_metrics}
+        for weight in np.arange(0.05, 0.91, 0.05):
+            pred = np.clip((1.0 - weight) * base_pred + weight * anchor, 0.0, CAPACITY_MW[plant] * 1.05)
+            mape, mae, rmse, r2 = day_ahead_metric_values(actual, pred, plant)
+            metrics_out = {"operational_mape": mape, "mae": mae, "rmse": rmse, "r2": r2}
+            score = rolling_selection_score(plant, metrics_out)
+            if score < best["score"]:
+                best = {"score": score, "weight": float(weight), "metrics": metrics_out}
+
+        meta_path = MODEL_DIR / f"meta_{plant}.json"
+        meta = json.loads(meta_path.read_text())
+        robust_improvement = (
+            best["weight"] > 0
+            and best["metrics"]["operational_mape"] < base_metrics["operational_mape"] - 0.25
+            and best["metrics"]["rmse"] < base_metrics["rmse"] - 0.25
+            and best["metrics"]["r2"] >= 0.60
+        )
+        if robust_improvement:
+            meta["day_ahead_profile_blend"] = {
+                "same_hour_yesterday_weight": best["weight"],
+                "source": "rolling_validation_only",
+                "validation_before": base_metrics,
+                "validation_after": best["metrics"],
+            }
+        else:
+            meta["day_ahead_profile_blend"] = None
+        meta["testing_used_for_day_ahead_profile_blend"] = False
+        meta_path.write_text(json.dumps(meta, indent=2, default=str))
+        rows.append({
+            "plant": plant,
+            "selected_weight": best["weight"],
+            "validation_before": base_metrics,
+            "validation_after": best["metrics"],
+            "testing_used": False,
+        })
+
+    path = RBFNN_META_DIR / "rbfnn_day_ahead_profile_blend_report.xlsx"
+    pd.DataFrame(rows).to_excel(path, index=False)
+    format_excel(path)
+    print("Saved:", path)
 
 
 # Loads optional actual next-day generation for post-forecast diagnostics.
@@ -1474,12 +2029,17 @@ def load_latest_inputs():
     else:
         raw_df = pd.read_excel(cleaned_excel)
     raw_df = add_runtime_compatibility_columns(rebuild_datetime(raw_df))
+    warn_if_saved_rbfnn_missing_rainfall_features(raw_df)
     planned = load_planned()
     return raw_df, planned
 
 
 # Recomputes validation/testing metrics from saved RBFNN models.
 def evaluate_saved_models(raw_df):
+    raise RuntimeError(
+        "One-step chronological validation/testing exports are disabled. "
+        "Use save_rbfnn_day_ahead_backtest(raw_df) for strict rolling 24-hour day-ahead outputs."
+    )
     feat_df = add_features(raw_df)
     summary_rows = []
     testing_prediction_rows = []
@@ -1615,6 +2175,8 @@ def run_training_and_forecast():
     testing_prediction_rows = []
     leakage_audit_rows = []
     calibration_report_rows = []
+    selection_audit_rows = []
+    validation_forecast_days = day_ahead_backtest_days(raw_df)["validation"]
 
     for plant in PLANTS:
         if selected_plants and plant not in selected_plants:
@@ -1641,42 +2203,94 @@ def run_training_and_forecast():
         val_actual = val_df[f"{target}_tplus1"].values.astype(float)
         test_actual = test_df[f"{target}_tplus1"].values.astype(float)
 
-        # --- Model configuration search ---
-        best = None
-        for n_centers in SEARCH_CENTER_COUNTS:
-            for learning_rate in SEARCH_LEARNING_RATES:
-                tf.keras.backend.clear_session()
-                model = build_model(x_train.shape[1], n_centers=n_centers, learning_rate=learning_rate)
-                init_centers(model, x_train, n_centers=n_centers)
-                history = model.fit(
-                    x_train,
-                    y_train,
-                    validation_data=(x_val, y_val_scaled),
-                    epochs=EPOCHS,
-                    batch_size=BATCH_SIZE,
-                    verbose=0,
-                    callbacks=[tf.keras.callbacks.EarlyStopping(monitor="val_loss", patience=10, restore_best_weights=True)],
-                )
-                val_delta_pred = y_scaler.inverse_transform(model.predict(x_val, verbose=0)).flatten()
-                test_delta_pred = y_scaler.inverse_transform(model.predict(x_test, verbose=0)).flatten()
+        # --- Model configuration search with preliminary validation screening ---
+        screened = []
+        for config in rbfnn_search_configs(plant):
+            tf.keras.backend.clear_session()
+            model = build_model(
+                x_train.shape[1],
+                n_centers=config["n_centers"],
+                learning_rate=config["learning_rate"],
+                gamma_init=config["gamma_init"],
+            )
+            init_centers(model, x_train, n_centers=config["n_centers"])
+            history = model.fit(
+                x_train,
+                y_train,
+                validation_data=(x_val, y_val_scaled),
+                epochs=EPOCHS,
+                batch_size=config["batch_size"],
+                verbose=0,
+                callbacks=[
+                    tf.keras.callbacks.EarlyStopping(
+                        monitor="val_loss",
+                        patience=config["patience"],
+                        restore_best_weights=True,
+                    )
+                ],
+            )
+            val_delta_pred = y_scaler.inverse_transform(model.predict(x_val, verbose=0)).flatten()
+            test_delta_pred = y_scaler.inverse_transform(model.predict(x_test, verbose=0)).flatten()
 
-                for shrinkage in SHRINKAGE_GRID:
-                    val_pred_candidate, bias = calibrated_level_predictions(val_current, val_delta_pred, val_actual, plant, shrinkage)
-                    val_m = metrics_dict(val_actual, val_pred_candidate, plant)
-                    score = candidate_score(val_m)
-                    if best is None or score < best["score"]:
-                        test_pred_candidate = apply_level_prediction(test_current, test_delta_pred, plant, shrinkage, bias)
-                        best = {
-                            "score": score,
-                            "model": model,
-                            "history": history,
-                            "n_centers": n_centers,
-                            "learning_rate": learning_rate,
-                            "shrinkage": shrinkage,
-                            "bias": bias,
-                            "val_pred": val_pred_candidate,
-                            "test_pred": test_pred_candidate,
-                        }
+            for shrinkage in SHRINKAGE_GRID:
+                val_pred_candidate, bias = calibrated_level_predictions(val_current, val_delta_pred, val_actual, plant, shrinkage)
+                val_m = metrics_dict(val_actual, val_pred_candidate, plant)
+                screened.append({
+                    "screen_score": candidate_score(val_m),
+                    "screen_metrics": val_m,
+                    "model": model,
+                    "history": history,
+                    "n_centers": config["n_centers"],
+                    "learning_rate": config["learning_rate"],
+                    "gamma_init": config["gamma_init"],
+                    "batch_size": config["batch_size"],
+                    "patience": config["patience"],
+                    "shrinkage": shrinkage,
+                    "bias": bias,
+                    "val_pred": val_pred_candidate,
+                    "test_pred": apply_level_prediction(test_current, test_delta_pred, plant, shrinkage, bias),
+                })
+
+        screened = sorted(screened, key=lambda item: item["screen_score"])
+        finalists = screened[:RBFNN_FINALIST_COUNT]
+        best = None
+        finalist_scores = []
+        for candidate in finalists:
+            meta_candidate = {
+                "plant": plant,
+                "target": target,
+                "y_col": y_col,
+                "X_cols": x_cols,
+                "capacity_mw": CAPACITY_MW[plant],
+                "best_shrinkage": candidate["shrinkage"],
+                "bias_correction_mw": candidate["bias"],
+                "bin_calibration": None,
+                "hourly_residual_correction": None,
+                "profile_blend": None,
+                "ramp_limit": ramp_limit(train_df[target]),
+            }
+            model_info = {
+                "meta": meta_candidate,
+                "model": candidate["model"],
+                "x_scaler": x_scaler,
+                "y_scaler": y_scaler,
+            }
+            rolling_score, rolling_metrics = rolling_candidate_score(raw_df, validation_forecast_days, plant, model_info)
+            candidate["rolling_score"] = rolling_score
+            candidate["rolling_validation_metrics"] = rolling_metrics
+            finalist_scores.append({
+                "n_centers": candidate["n_centers"],
+                "learning_rate": candidate["learning_rate"],
+                "gamma_init": candidate["gamma_init"],
+                "batch_size": candidate["batch_size"],
+                "patience": candidate["patience"],
+                "shrinkage": candidate["shrinkage"],
+                "preliminary_validation_score": candidate["screen_score"],
+                "rolling_validation_score": rolling_score,
+                "rolling_validation_metrics": rolling_metrics,
+            })
+            if best is None or rolling_score < best["rolling_score"]:
+                best = candidate
 
         # --- Validation calibration and testing evaluation ---
         model = best["model"]
@@ -1685,20 +2299,104 @@ def run_training_and_forecast():
         bias = best["bias"]
         val_pred = best["val_pred"]
         test_pred = best["test_pred"]
-        bin_calibration, val_pred = tune_bin_calibration(plant, val_current, val_actual, val_pred)
-        test_basis = test_pred if bin_calibration and bin_calibration.get("basis") == "base_pred" else test_current
-        test_pred = apply_bin_calibration(test_pred, test_basis, plant, bin_calibration)
+        limit = ramp_limit(train_df[target])
+        accepted_roll_score = best["rolling_score"]
+        selected_roll_metrics = best["rolling_validation_metrics"]
+
+        bin_candidate, bin_val_pred = tune_bin_calibration(plant, val_current, val_actual, val_pred)
+        bin_calibration = None
+        if bin_candidate:
+            meta_candidate = {
+                "plant": plant,
+                "target": target,
+                "y_col": y_col,
+                "X_cols": x_cols,
+                "capacity_mw": CAPACITY_MW[plant],
+                "best_shrinkage": shrinkage,
+                "bias_correction_mw": bias,
+                "bin_calibration": bin_candidate,
+                "hourly_residual_correction": None,
+                "profile_blend": None,
+                "ramp_limit": limit,
+            }
+            roll_score, roll_metrics = rolling_candidate_score(raw_df, validation_forecast_days, plant, {
+                "meta": meta_candidate,
+                "model": model,
+                "x_scaler": x_scaler,
+                "y_scaler": y_scaler,
+            })
+            if roll_score < accepted_roll_score:
+                bin_calibration = bin_candidate
+                val_pred = bin_val_pred
+                test_basis = test_pred if bin_calibration.get("basis") == "base_pred" else test_current
+                test_pred = apply_bin_calibration(test_pred, test_basis, plant, bin_calibration)
+                accepted_roll_score = roll_score
+                selected_roll_metrics = roll_metrics
+
         val_hours = target_hours_from_rows(val_df)
         test_hours = target_hours_from_rows(test_df)
-        hourly_correction, val_pred = tune_hourly_correction(plant, val_pred, val_actual, val_hours)
-        test_pred = apply_hourly_correction(test_pred, test_hours, plant, hourly_correction)
-        profile_blend, val_pred = tune_profile_blend(plant, val_pred, val_actual, same_hour_target_anchor(val_df, plant))
-        test_pred = apply_profile_blend(test_pred, same_hour_target_anchor(test_df, plant), plant, profile_blend)
+        hourly_candidate, hourly_val_pred = tune_hourly_correction(plant, val_pred, val_actual, val_hours)
+        hourly_correction = None
+        if hourly_candidate:
+            meta_candidate = {
+                "plant": plant,
+                "target": target,
+                "y_col": y_col,
+                "X_cols": x_cols,
+                "capacity_mw": CAPACITY_MW[plant],
+                "best_shrinkage": shrinkage,
+                "bias_correction_mw": bias,
+                "bin_calibration": bin_calibration,
+                "hourly_residual_correction": hourly_candidate,
+                "profile_blend": None,
+                "ramp_limit": limit,
+            }
+            roll_score, roll_metrics = rolling_candidate_score(raw_df, validation_forecast_days, plant, {
+                "meta": meta_candidate,
+                "model": model,
+                "x_scaler": x_scaler,
+                "y_scaler": y_scaler,
+            })
+            if roll_score < accepted_roll_score:
+                hourly_correction = hourly_candidate
+                val_pred = hourly_val_pred
+                test_pred = apply_hourly_correction(test_pred, test_hours, plant, hourly_correction)
+                accepted_roll_score = roll_score
+                selected_roll_metrics = roll_metrics
+
+        profile_candidate, profile_val_pred = tune_profile_blend(plant, val_pred, val_actual, same_hour_target_anchor(val_df, plant))
+        profile_blend = None
+        if profile_candidate:
+            meta_candidate = {
+                "plant": plant,
+                "target": target,
+                "y_col": y_col,
+                "X_cols": x_cols,
+                "capacity_mw": CAPACITY_MW[plant],
+                "best_shrinkage": shrinkage,
+                "bias_correction_mw": bias,
+                "bin_calibration": bin_calibration,
+                "hourly_residual_correction": hourly_correction,
+                "profile_blend": profile_candidate,
+                "ramp_limit": limit,
+            }
+            roll_score, roll_metrics = rolling_candidate_score(raw_df, validation_forecast_days, plant, {
+                "meta": meta_candidate,
+                "model": model,
+                "x_scaler": x_scaler,
+                "y_scaler": y_scaler,
+            })
+            if roll_score < accepted_roll_score:
+                profile_blend = profile_candidate
+                val_pred = profile_val_pred
+                test_pred = apply_profile_blend(test_pred, same_hour_target_anchor(test_df, plant), plant, profile_blend)
+                accepted_roll_score = roll_score
+                selected_roll_metrics = roll_metrics
+
         val_metrics = metrics_dict(val_actual, val_pred, plant)
         test_metrics = metrics_dict(test_actual, test_pred, plant)
         val_shape = shape_metrics(val_actual, val_pred)
         test_shape = shape_metrics(test_actual, test_pred)
-        limit = ramp_limit(train_df[target])
 
         row = {
             "model": "RBFNN",
@@ -1747,7 +2445,11 @@ def run_training_and_forecast():
             "ramp_limit": limit,
             "selected_centers": best["n_centers"],
             "selected_learning_rate": best["learning_rate"],
-            "selection_metric": "lowest validation operational MAPE, with Agus 5/7 post-calibrated for hourly residual and same-hour-yesterday shape tracking",
+            "selected_gamma_init": best["gamma_init"],
+            "selected_batch_size": best["batch_size"],
+            "selected_patience": best["patience"],
+            "selection_metric": "lowest R2-aware rolling day-ahead validation score among preliminarily screened finalists; score penalizes MAPE, RMSE, low R2, and especially negative R2",
+            "rolling_validation_metrics": selected_roll_metrics,
             "derived_from": "validation set only",
             "testing_used_for_calibration": "No",
             "model_type": "RBFNN residual/delta model anchored to persistence",
@@ -1758,6 +2460,9 @@ def run_training_and_forecast():
             "feature_count": len(x_cols),
             "selected centers": best["n_centers"],
             "selected learning rate": best["learning_rate"],
+            "selected gamma init": best["gamma_init"],
+            "selected batch size": best["batch_size"],
+            "selected patience": best["patience"],
             "selected shrinkage": shrinkage,
             "bias correction": bias,
             "bin calibration used": "Yes" if bin_calibration else "No",
@@ -1769,27 +2474,39 @@ def run_training_and_forecast():
             "testing used for calibration": "No",
         })
 
-        save_daily_metrics(val_df, val_actual, val_pred, plant, VALIDATION_METRICS_DIR / f"{plant}_validation_daily_metrics.xlsx")
-        save_daily_metrics(test_df, test_actual, test_pred, plant, TESTING_METRICS_DIR / f"{plant}_testing_daily_metrics.xlsx")
+        selection_audit_rows.append({
+            "plant": plant,
+            "model": "RBFNN",
+            "feature_count": len(x_cols),
+            "selected_hyperparameters": {
+                "centers": best["n_centers"],
+                "learning_rate": best["learning_rate"],
+                "gamma_init": best["gamma_init"],
+                "batch_size": best["batch_size"],
+                "early_stopping_patience": best["patience"],
+                "shrinkage": shrinkage,
+            },
+            "calibration": {
+                "bin_calibration": bool(bin_calibration),
+                "hourly_residual_correction": bool(hourly_correction),
+                "profile_blend": bool(profile_blend),
+                "ramp_limit": limit,
+            },
+            "preliminary_validation_score": best["screen_score"],
+            "rolling_validation_score": accepted_roll_score,
+            "rolling_validation_metrics": selected_roll_metrics,
+            "finalists": finalist_scores,
+            "validation_metrics_after_calibration": val_metrics,
+            "testing_metrics_after_final_evaluation": test_metrics,
+            "testing_used_for_selection_or_calibration": False,
+        })
+
         print("Saved:", history_path)
         print(pd.DataFrame([row]).to_string(index=False))
 
-    summary = pd.DataFrame(summary_rows)[METRICS_COLUMNS]
     save_leakage_audit(leakage_audit_rows)
     save_rbfnn_calibration_report(calibration_report_rows)
-    summary_path = OVERALL_METRICS_DIR / "rbfnn_validation_testing_metrics.xlsx"
-    if selected_plants and summary_path.exists():
-        existing_summary = pd.read_excel(summary_path)
-        existing_summary = existing_summary[~existing_summary["plant"].isin(selected_plants)]
-        summary = pd.concat([existing_summary, summary], ignore_index=True)
-        summary["plant_order"] = summary["plant"].map({plant: idx for idx, plant in enumerate(PLANTS)})
-        summary = summary.sort_values("plant_order").drop(columns=["plant_order"]).reset_index(drop=True)
-    summary.to_excel(summary_path, index=False)
-    format_excel(summary_path)
-    testing_path = OVERALL_METRICS_DIR / "rbfnn_testing_predictions.xlsx"
-    testing_predictions = pd.DataFrame(testing_prediction_rows)[TESTING_PREDICTION_COLUMNS]
-    testing_predictions.to_excel(testing_path, index=False)
-    format_excel(testing_path)
+    update_model_selection_audit("rbfnn", selection_audit_rows)
     if not selected_plants or all(model_file(f"rbfnn_{plant}.keras").exists() for plant in PLANTS):
         forecast = forecast_24h(raw_df, planned)
         output_forecast = format_forecast_output(forecast)
@@ -1800,81 +2517,44 @@ def run_training_and_forecast():
         format_excel(forecast_xlsx)
         print("Saved:", forecast_xlsx)
         print("Saved:", forecast_csv)
-
-    original_path = PROJECT_DIR / "data" / "outputs" / "03_metadata" / "validation_testing_metrics" / "rbfnn_validation_testing_metrics.xlsx"
-    comparison = summary.copy()
-    if original_path.exists():
-        original = pd.read_excel(original_path)
-        rename_map = {
-            "val_mape": "original_val_mape",
-            "val_mae": "original_val_mae",
-            "val_rmse": "original_val_rmse",
-            "val_r2": "original_val_r2",
-            "test_mape": "original_test_mape",
-            "test_mae": "original_test_mae",
-            "test_rmse": "original_test_rmse",
-            "test_r2": "original_test_r2",
-        }
-        original = original.rename(columns=rename_map)
-        keep_cols = ["plant"] + [c for c in rename_map.values() if c in original.columns]
-        comparison = comparison.merge(original[keep_cols], on="plant", how="left")
-        comparison["original_summary_available"] = comparison["original_test_r2"].notna()
-    else:
-        comparison["original_summary_available"] = False
-    comparison = comparison.fillna("not_available")
-    comparison.to_excel(OVERALL_METRICS_DIR / "optimized_vs_original_summary.xlsx", index=False)
-
-    benchmark_path = OVERALL_METRICS_DIR / "optimized_benchmark_validation_testing_metrics.xlsx"
-    if benchmark_path.exists():
-        benchmarks = pd.read_excel(benchmark_path)
-        comparison_rows = []
-        for _, rbfnn_row in summary.iterrows():
-            plant = rbfnn_row["plant"]
-            plant_bench = benchmarks[benchmarks["plant"] == plant].copy()
-            best_val = plant_bench.loc[plant_bench["val_operational_mape"].idxmin()]
-            best_test = plant_bench.loc[plant_bench["test_operational_mape"].idxmin()]
-            val_margin = float(best_val["val_operational_mape"] - rbfnn_row["val_operational_mape"])
-            test_margin = float(best_test["test_operational_mape"] - rbfnn_row["test_operational_mape"])
-            comparison_rows.append({
-                "plant": plant,
-                "rbfnn_val_operational_mape": rbfnn_row["val_operational_mape"],
-                "best_benchmark_val_model": best_val["model"],
-                "best_benchmark_val_operational_mape": best_val["val_operational_mape"],
-                "val_mape_margin": val_margin,
-                "rbfnn_test_operational_mape": rbfnn_row["test_operational_mape"],
-                "best_benchmark_test_model": best_test["model"],
-                "best_benchmark_test_operational_mape": best_test["test_operational_mape"],
-                "test_mape_margin": test_margin,
-                "rbfnn_wins_val_mape": val_margin > 0,
-                "rbfnn_wins_test_mape": test_margin > 0,
-                "rbfnn_wins_both": val_margin > 0 and test_margin > 0,
-            })
-        benchmark_comparison = pd.DataFrame(comparison_rows)
-        benchmark_comparison_path = OVERALL_METRICS_DIR / "rbfnn_vs_benchmark_mape_comparison.xlsx"
-        benchmark_comparison.to_excel(benchmark_comparison_path, index=False)
-        print("\nRBFNN vs benchmark MAPE comparison:")
-        print(benchmark_comparison.to_string(index=False))
-        print("Saved:", benchmark_comparison_path)
-    else:
-        print("Benchmark metrics not found; run optimized_cell3_benchmark.py before final benchmark comparison.")
-
-    print("\nOptimized RBFNN summary:")
-    print(summary.to_string(index=False))
-    print("Saved:", summary_path)
-    print("Saved:", testing_path)
-    if not selected_plants:
         save_rbfnn_day_ahead_backtest(raw_df)
+    else:
+        print("Skipped strict day-ahead metric export because not all plant models are available.")
 
 
 # Selects training mode when --train is passed; otherwise runs forecast-only mode.
 def main():
     args = sys.argv[1:]
-    allowed_args = {"--train", "--forecast-only", "--day-ahead-backtest"}
+    allowed_args = {
+        "--train",
+        "--forecast-only",
+        "--day-ahead-backtest",
+        "--outage-informed-backtest",
+        "--audit-only",
+        "--tune-day-ahead-profile",
+    }
     unknown = [arg for arg in args if arg.startswith("--") and arg not in allowed_args]
     if unknown:
         raise ValueError(f"Unsupported argument(s): {unknown}. Use --forecast-only or --train.")
+    if "--audit-only" in args:
+        save_loaded_rbfnn_selection_audit()
+        return
+    if "--tune-day-ahead-profile" in args:
+        raw_df, _ = load_latest_inputs()
+        tune_saved_day_ahead_profile_blends(raw_df)
+        save_rbfnn_day_ahead_backtest(raw_df)
+        save_loaded_rbfnn_selection_audit()
+        return
     if "--train" in args and "--forecast-only" in args:
         raise ValueError("Use either --forecast-only or --train, not both.")
+    if "--day-ahead-backtest" in args and "--train" not in args:
+        raw_df, _ = load_latest_inputs()
+        save_rbfnn_day_ahead_backtest(raw_df)
+        return
+    if "--outage-informed-backtest" in args and "--train" not in args:
+        raw_df, _ = load_latest_inputs()
+        save_rbfnn_outage_informed_backtest(raw_df)
+        return
     if "--train" in args:
         run_training_and_forecast()
     else:

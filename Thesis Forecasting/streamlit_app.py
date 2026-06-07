@@ -1138,6 +1138,14 @@ def data_management_page() -> None:
         with confirm_cols_2[3]:
             metric_card("Total Cleaned Columns", f"{len(cleaned_df.columns):,}" if cleaned_df is not None else "N/A", "Prepared features")
 
+        rainfall_available = cleaned_df is not None and "rainfall" in cleaned_df.columns
+        metric_card(
+            "Rainfall Input",
+            "Available" if rainfall_available else "Missing",
+            "Rainfall (daily-derived hourly-equivalent)",
+            "green" if rainfall_available else "red",
+        )
+
     section_title("Data Notes")
     with st.container():
         note_card("Uploading replaces the raw Excel workbook used by the cleaning script. Refreshing reloads the latest files from disk without restarting the application. Running data cleaning updates the cleaned hourly dataset used by the forecasting workflow.")
@@ -1330,12 +1338,18 @@ def system_information_page() -> None:
                 status_card(label, path)
 
     section_title("System Details")
+    try:
+        cleaned_df = load_cleaned_data(modified_ns(cleaned_source_path()))
+        rainfall_status = "Available" if "rainfall" in cleaned_df.columns else "Missing"
+    except Exception:
+        rainfall_status = "Unavailable"
     details = pd.DataFrame(
         [
             {"Detail": "Python Version", "Value": platform.python_version()},
             {"Detail": "Streamlit Version", "Value": st.__version__},
             {"Detail": "Forecast Model", "Value": "RBFNN"},
             {"Detail": "Forecast Horizon", "Value": "24 Hours Day-Ahead"},
+            {"Detail": "Hydrologic Input", "Value": f"Rainfall (daily-derived hourly-equivalent): {rainfall_status}"},
             {"Detail": "Timezone", "Value": "Asia/Manila"},
             {"Detail": "Last System Check", "Value": datetime.now().strftime("%Y-%m-%d %H:%M")},
         ]
