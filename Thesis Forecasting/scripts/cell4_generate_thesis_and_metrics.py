@@ -30,6 +30,7 @@ METADATA_DIR = BASE_DIR / "metadata"
 OVERALL_METRICS_DIR = METADATA_DIR / "overall_metrics"
 DAY_AHEAD_BACKTEST_DIR = METADATA_DIR / "day_ahead_backtest"
 THESIS_FIGURES_DIR = BASE_DIR / "thesis_figures"
+MODEL_METRICS_DIR = METADATA_DIR / "model_metrics"
 
 # Stores plant labels, model source files, and figure output folders.
 PLANTS = ["agus1", "agus2", "agus4", "agus5", "agus6", "agus7"]
@@ -87,6 +88,8 @@ CAPACITY_MW = {"agus1": 80.0, "agus2": 180.0, "agus4": 158.1, "agus5": 55.0, "ag
 FIGURE_DIRS = {
     "cleaned_profiles": THESIS_FIGURES_DIR / "cleaned_profiles",
     "testing_actual_vs_forecast": THESIS_FIGURES_DIR / "testing_actual_vs_forecast",
+    "testing_actual_vs_forecast_by_model": THESIS_FIGURES_DIR / "testing_actual_vs_forecast_by_model",
+    "all_models_testing_actual_vs_forecast": THESIS_FIGURES_DIR / "all_models_testing_actual_vs_forecast",
     "error_analysis": THESIS_FIGURES_DIR / "error_analysis",
     "benchmark_comparison": THESIS_FIGURES_DIR / "benchmark_comparison",
     "day_ahead_forecast": THESIS_FIGURES_DIR / "day_ahead_forecast",
@@ -104,6 +107,8 @@ def ensure_dirs():
     for path in FIGURE_DIRS.values():
         path.mkdir(parents=True, exist_ok=True)
     (METADATA_DIR / "overall_comparison").mkdir(parents=True, exist_ok=True)
+    for model_key in MODEL_KEYS.values():
+        (MODEL_METRICS_DIR / model_key).mkdir(parents=True, exist_ok=True)
 
 
 # Tracks saved files in the console output.
@@ -182,10 +187,17 @@ def save_excel(df, path, sheet_name="Sheet1"):
     save_path(path)
 
 
+def copy_excel(src, dst):
+    require_file(src)
+    df = pd.read_excel(src)
+    save_excel(df, dst)
+
+
 # Saves the current Matplotlib figure using thesis figure settings.
-def save_figure(path):
+def save_figure(path, tight=True):
     path.parent.mkdir(parents=True, exist_ok=True)
-    plt.tight_layout()
+    if tight:
+        plt.tight_layout()
     plt.savefig(path, dpi=300, bbox_inches="tight")
     plt.close()
     save_path(path)
@@ -422,6 +434,175 @@ def generate_testing_actual_vs_forecast_figures():
         save_figure(FIGURE_DIRS["testing_actual_vs_forecast"] / f"figure_4_{offset:02d}_{plant}_testing_actual_vs_forecast.png")
 
 
+# Generates one combined RBFNN testing figure with actual and forecast lines by plant.
+def generate_rbfnn_testing_actual_vs_forecast_panel():
+    df = read_predictions("RBFNN")
+    plot_data = df[
+        ["datetime", "plant", "actual_generation", "predicted_generation", "model"]
+    ].copy()
+    plot_data["plant_label"] = plot_data["plant"].astype(str).map(PLANT_LABELS)
+    save_excel(
+        plot_data,
+        OVERALL_METRICS_DIR / "rbfnn_testing_actual_vs_forecast_plot_data.xlsx",
+        sheet_name="RBFNN Testing Plot Data",
+    )
+
+    fig, axes = plt.subplots(3, 2, figsize=(15, 10), sharex=False)
+    axes = axes.flatten()
+    for ax, plant in zip(axes, PLANTS):
+        plant_df = plot_data[plot_data["plant"].astype(str) == plant]
+        ax.plot(
+            plant_df["datetime"],
+            plant_df["actual_generation"],
+            label="Actual",
+            linewidth=1.0,
+            color="#1f77b4",
+        )
+        ax.plot(
+            plant_df["datetime"],
+            plant_df["predicted_generation"],
+            label="RBFNN Testing Forecast",
+            linewidth=1.0,
+            color="#d62728",
+        )
+        ax.set_title(f"{PLANT_LABELS[plant]}")
+        ax.set_ylabel("MW")
+        ax.grid(True, alpha=0.25)
+
+    for ax in axes[-2:]:
+        ax.set_xlabel("Testing Datetime")
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper center", ncol=2, frameon=False, bbox_to_anchor=(0.5, 0.965))
+    fig.suptitle("RBFNN Testing Actual vs Forecast by Plant (rolling 24h day-ahead)", y=0.995)
+    fig.autofmt_xdate(rotation=25)
+    fig.tight_layout(rect=[0, 0, 1, 0.93])
+    save_figure(FIGURE_DIRS["testing_actual_vs_forecast"] / "rbfnn_testing_actual_vs_forecast_all_plants.png", tight=False)
+
+
+def generate_testing_actual_vs_forecast_by_model_figures():
+    model_colors = {
+        "RBFNN": "#d62728",
+        "Random Forest": "#2ca02c",
+        "XGBoost": "#9467bd",
+    }
+    safe_names = {
+        "RBFNN": "rbfnn",
+        "Random Forest": "random_forest",
+        "XGBoost": "xgboost",
+    }
+    rows = []
+    for model_name in MODEL_KEYS:
+        model_df = read_predictions(model_name)
+        model_dir = FIGURE_DIRS["testing_actual_vs_forecast_by_model"] / safe_names[model_name]
+        model_dir.mkdir(parents=True, exist_ok=True)
+        for plant in PLANTS:
+            plant_df = model_df[model_df["plant"].astype(str) == plant].copy()
+            rows.append(
+                plant_df[
+                    ["datetime", "plant", "actual_generation", "predicted_generation", "model"]
+                ]
+            )
+            plt.figure(figsize=(12, 5))
+            plt.plot(
+                plant_df["datetime"],
+                plant_df["actual_generation"],
+                label="Actual",
+                linewidth=1.1,
+                color="#1f77b4",
+            )
+            plt.plot(
+                plant_df["datetime"],
+                plant_df["predicted_generation"],
+                label=f"{model_name} Forecast",
+                linewidth=1.0,
+                color=model_colors[model_name],
+            )
+            plt.title(f"Testing Actual vs Forecast - {PLANT_LABELS[plant]} ({model_name}, rolling 24h day-ahead)")
+            plt.xlabel("Datetime")
+            plt.ylabel("Generation (MW)")
+            plt.grid(True, alpha=0.25)
+            plt.legend()
+            save_figure(model_dir / f"{safe_names[model_name]}_{plant}_testing_actual_vs_forecast.png")
+
+    plot_data = pd.concat(rows, ignore_index=True)
+    plot_data["plant_label"] = plot_data["plant"].astype(str).map(PLANT_LABELS)
+    save_excel(
+        plot_data.sort_values(["model", "plant", "datetime"]),
+        OVERALL_METRICS_DIR / "testing_actual_vs_forecast_by_model_plot_data.xlsx",
+        sheet_name="By Model Plot Data",
+    )
+
+
+def generate_all_models_testing_actual_vs_forecast_figures():
+    frames = []
+    for model_name in MODEL_KEYS:
+        df = read_predictions(model_name)
+        df = df[["datetime", "plant", "actual_generation", "predicted_generation", "model"]].copy()
+        df["model"] = model_name
+        frames.append(df)
+    plot_data = pd.concat(frames, ignore_index=True)
+    plot_data["plant_label"] = plot_data["plant"].astype(str).map(PLANT_LABELS)
+    save_excel(
+        plot_data.sort_values(["plant", "model", "datetime"]),
+        OVERALL_METRICS_DIR / "all_models_testing_actual_vs_forecast_plot_data.xlsx",
+        sheet_name="All Models Testing Plot Data",
+    )
+
+    model_colors = {
+        "RBFNN": "#d62728",
+        "Random Forest": "#2ca02c",
+        "XGBoost": "#9467bd",
+    }
+    for plant in PLANTS:
+        plant_df = plot_data[plot_data["plant"].astype(str) == plant].copy()
+        actual = plant_df[plant_df["model"] == "RBFNN"][["datetime", "actual_generation"]].drop_duplicates("datetime")
+        plt.figure(figsize=(12, 5))
+        plt.plot(actual["datetime"], actual["actual_generation"], label="Actual", linewidth=1.1, color="#1f77b4")
+        for model_name, color in model_colors.items():
+            model_df = plant_df[plant_df["model"] == model_name]
+            plt.plot(
+                model_df["datetime"],
+                model_df["predicted_generation"],
+                label=f"{model_name} Forecast",
+                linewidth=0.95,
+                color=color,
+                alpha=0.9,
+            )
+        plt.title(f"Testing Actual vs Forecast - {PLANT_LABELS[plant]} (All Models, rolling 24h day-ahead)")
+        plt.xlabel("Datetime")
+        plt.ylabel("Generation (MW)")
+        plt.grid(True, alpha=0.25)
+        plt.legend(ncol=2)
+        save_figure(
+            FIGURE_DIRS["all_models_testing_actual_vs_forecast"]
+            / f"{plant}_all_models_testing_actual_vs_forecast.png"
+        )
+
+    fig, axes = plt.subplots(3, 2, figsize=(16, 10), sharex=False)
+    axes = axes.flatten()
+    for ax, plant in zip(axes, PLANTS):
+        plant_df = plot_data[plot_data["plant"].astype(str) == plant].copy()
+        actual = plant_df[plant_df["model"] == "RBFNN"][["datetime", "actual_generation"]].drop_duplicates("datetime")
+        ax.plot(actual["datetime"], actual["actual_generation"], label="Actual", linewidth=1.0, color="#1f77b4")
+        for model_name, color in model_colors.items():
+            model_df = plant_df[plant_df["model"] == model_name]
+            ax.plot(model_df["datetime"], model_df["predicted_generation"], label=model_name, linewidth=0.85, color=color)
+        ax.set_title(PLANT_LABELS[plant])
+        ax.set_ylabel("MW")
+        ax.grid(True, alpha=0.25)
+    for ax in axes[-2:]:
+        ax.set_xlabel("Testing Datetime")
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper center", ncol=4, frameon=False, bbox_to_anchor=(0.5, 0.965))
+    fig.suptitle("Testing Actual vs Forecast by Plant (All Models, rolling 24h day-ahead)", y=0.995)
+    fig.autofmt_xdate(rotation=25)
+    fig.tight_layout(rect=[0, 0, 1, 0.93])
+    save_figure(
+        FIGURE_DIRS["all_models_testing_actual_vs_forecast"] / "all_models_testing_actual_vs_forecast_panel.png",
+        tight=False,
+    )
+
+
 # Computes plant-level MAPE from actual and predicted testing values.
 def plant_mape(df):
     rows = []
@@ -508,8 +689,8 @@ def read_day_ahead_forecast(path, model_name):
 def generate_day_ahead_forecast_figure():
     forecasts = [
         read_day_ahead_forecast(BASE_DIR / "outputs" / "rbfnn_forecast" / "Day_Ahead_24H_RBFNN_Forecast.xlsx", "RBFNN"),
-        read_day_ahead_forecast(BASE_DIR / "benchmark" / "random_forest" / "Day_Ahead_24H_RANDOM_FOREST.xlsx", "Random Forest"),
-        read_day_ahead_forecast(BASE_DIR / "benchmark" / "xgboost" / "Day_Ahead_24H_XGBOOST.xlsx", "XGBoost"),
+        read_day_ahead_forecast(BASE_DIR / "outputs" / "random_forest_forecast" / "Day_Ahead_24H_RANDOM_FOREST.xlsx", "Random Forest"),
+        read_day_ahead_forecast(BASE_DIR / "outputs" / "xgboost_forecast" / "Day_Ahead_24H_XGBOOST.xlsx", "XGBoost"),
     ]
     plt.figure(figsize=(11, 5))
     for df in forecasts:
@@ -720,18 +901,39 @@ def write_day_ahead_backtest_comparison():
     save_excel(summary, DAY_AHEAD_BACKTEST_DIR / "all_models_day_ahead_backtest_summary.xlsx")
 
 
+def sync_model_metrics_workbooks():
+    for model_name, model_key in MODEL_KEYS.items():
+        model_dir = MODEL_METRICS_DIR / model_key
+        copy_excel(
+            MODEL_FILES[model_name]["metrics"],
+            model_dir / f"{model_key}_validation_testing_metrics.xlsx",
+        )
+        copy_excel(
+            DAY_AHEAD_MODEL_FILES[model_name]["validation"],
+            model_dir / f"{model_key}_validation_day_ahead_metrics.xlsx",
+        )
+        copy_excel(
+            DAY_AHEAD_MODEL_FILES[model_name]["testing"],
+            model_dir / f"{model_key}_testing_day_ahead_metrics.xlsx",
+        )
+
+
 # Runs all thesis figure and organized metadata generation steps.
 def main():
     # --- Figure and metadata generation pipeline ---
     ensure_dirs()
     generate_cleaned_profile_figures()
     generate_testing_actual_vs_forecast_figures()
+    generate_rbfnn_testing_actual_vs_forecast_panel()
+    generate_testing_actual_vs_forecast_by_model_figures()
+    generate_all_models_testing_actual_vs_forecast_figures()
     generate_error_analysis_figures()
     generate_benchmark_comparison_figures()
     generate_day_ahead_forecast_figure()
     write_hydrologic_input_metadata()
     write_overall_comparison()
     write_day_ahead_backtest_comparison()
+    sync_model_metrics_workbooks()
     print("DONE: Thesis figures and organized metadata files generated successfully.")
 
 

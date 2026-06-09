@@ -34,10 +34,9 @@ LEGACY_OPT_DIR = PROJECT_DIR / "archive" / "optimized_version"
 OUT_DIR = OPT_DIR / "outputs"
 CLEANED_DATA_DIR = OUT_DIR / "cleaned_data"
 OUTAGES_DIR = OUT_DIR / "outages_planning"
-BENCHMARK_DIR = OPT_DIR / "benchmark"
 BENCHMARK_OUTPUT_DIRS = {
-    "random_forest": BENCHMARK_DIR / "random_forest",
-    "xgboost": BENCHMARK_DIR / "xgboost",
+    "random_forest": OUT_DIR / "random_forest_forecast",
+    "xgboost": OUT_DIR / "xgboost_forecast",
 }
 MODEL_DIRS = {
     "random_forest": OPT_DIR / "models" / "random_forest",
@@ -100,6 +99,7 @@ ROLL_WINDOWS = [3, 6, 12, 24, 48, 168]
 MODEL_KEYS = {"Random Forest": "random_forest", "XGBoost": "xgboost"}
 FEATURE_HISTORY_WINDOW = 240
 BENCHMARK_FINALIST_COUNT = 3
+SELECTION_DAY_AHEAD_MAX_DAYS = 12
 R2_WEIGHT = 8.0
 NEGATIVE_R2_PENALTY = 25.0
 DAY_AHEAD_EVALUATION_TYPE = "rolling_24h_day_ahead_backtest"
@@ -170,6 +170,209 @@ def level_from_delta(current, delta_pred, plant):
     )
 
 
+SHRINKAGE_GRID = [0.05, 0.10, 0.20, 0.35, 0.50, 0.75, 1.00, 1.15]
+BIN_CALIBRATION_QUANTILES = list(range(3, 21))
+BIN_CALIBRATION_SCALES = [round(x, 2) for x in np.arange(0.50, 2.55, 0.05)]
+PROFILE_BLEND_GRID = [0.0, 0.10, 0.20, 0.30, 0.40, 0.55, 0.70, 0.85]
+HOURLY_CORRECTION_SCALE_GRID = [0.0, 0.25, 0.50, 0.75, 1.00, 1.25]
+ANCHOR_BLEND_GRID = [0.0, 0.25, 0.50, 0.75, 1.00]
+ANCHOR_CURRENT_WEIGHT_GRID = [0.0, 0.25, 0.50, 0.75, 1.00]
+
+
+def calibrated_level_prediction(current, delta_pred, plant, calibration=None):
+    calibration = calibration or {}
+    shrinkage = float(calibration.get("shrinkage", 1.0))
+    bias = float(calibration.get("bias_correction_mw", 0.0))
+    return np.clip(
+        np.asarray(current, dtype=float) + shrinkage * np.asarray(delta_pred, dtype=float) + bias,
+        0.0,
+        CAPACITY_MW[plant] * 1.05,
+    )
+
+
+def fit_shrinkage_bias(current, delta_pred, actual, plant):
+    best = None
+    for shrinkage in SHRINKAGE_GRID:
+        raw_pred = np.clip(
+            np.asarray(current, dtype=float) + shrinkage * np.asarray(delta_pred, dtype=float),
+            0.0,
+            CAPACITY_MW[plant] * 1.05,
+        )
+        bias = float(np.median(np.asarray(actual, dtype=float) - raw_pred))
+        bias = float(np.clip(bias, -operational_threshold(plant), operational_threshold(plant)))
+        pred = np.clip(raw_pred + bias, 0.0, CAPACITY_MW[plant] * 1.05)
+        score = candidate_score(metrics(actual, pred, plant))
+        if best is None or score < best["score"]:
+            best = {
+                "score": score,
+                "calibration": {
+                    "shrinkage": float(shrinkage),
+                    "bias_correction_mw": bias,
+                    "bin_calibration": None,
+                    "hourly_residual_correction": None,
+                    "profile_blend": None,
+                },
+                "pred": pred,
+            }
+    return best["calibration"], best["pred"]
+
+
+def calibration_bins(values, q):
+    _, bins = pd.qcut(pd.Series(values), q, duplicates="drop", retbins=True)
+    return np.asarray(bins, dtype=float)
+
+
+def bin_ids(values, bins):
+    return np.digitize(np.asarray(values, dtype=float), bins[1:-1])
+
+
+def apply_bin_calibration(pred, basis_values, plant, calibration):
+    if not calibration:
+        return np.asarray(pred, dtype=float)
+    bins = np.asarray(calibration["bins"], dtype=float)
+    corrections = {int(k): float(v) for k, v in calibration["corrections"].items()}
+    scale = float(calibration["scale"])
+    ids = bin_ids(basis_values, bins)
+    out = np.asarray(pred, dtype=float).copy()
+    for idx, bin_id in enumerate(ids):
+        out[idx] += scale * corrections.get(int(bin_id), 0.0)
+    return np.clip(out, 0.0, CAPACITY_MW[plant] * 1.05)
+
+
+def tune_bin_calibration(plant, basis_values, actual, pred):
+    best = {"score": candidate_score(metrics(actual, pred, plant)), "calibration": None, "pred": np.asarray(pred, dtype=float)}
+    for q in BIN_CALIBRATION_QUANTILES:
+        try:
+            bins = calibration_bins(basis_values, q)
+        except ValueError:
+            continue
+        ids = bin_ids(basis_values, bins)
+        residual = np.asarray(actual, dtype=float) - np.asarray(pred, dtype=float)
+        corrections = {
+            int(bin_id): float(np.median(residual[ids == bin_id]))
+            for bin_id in np.unique(ids)
+            if np.any(ids == bin_id)
+        }
+        for scale in BIN_CALIBRATION_SCALES:
+            calibration = {"bins": bins.tolist(), "corrections": corrections, "scale": float(scale), "basis": "current"}
+            candidate = apply_bin_calibration(pred, basis_values, plant, calibration)
+            score = candidate_score(metrics(actual, candidate, plant))
+            if score < best["score"]:
+                best = {"score": score, "calibration": calibration, "pred": candidate}
+    return best["calibration"], best["pred"]
+
+
+def target_hours_from_rows(df):
+    return ((pd.to_numeric(df["time"]).astype(int) % 24) + 1).astype(int).values
+
+
+def apply_hourly_correction(pred, hours, plant, correction):
+    if not correction:
+        return np.asarray(pred, dtype=float)
+    scale = float(correction.get("scale", 0.0))
+    by_hour = {int(k): float(v) for k, v in correction.get("hour_corrections", {}).items()}
+    offsets = np.asarray([by_hour.get(int(hour), 0.0) for hour in hours], dtype=float)
+    return np.clip(np.asarray(pred, dtype=float) + scale * offsets, 0.0, CAPACITY_MW[plant] * 1.05)
+
+
+def tune_hourly_correction(plant, pred, actual, hours):
+    residual = np.asarray(actual, dtype=float) - np.asarray(pred, dtype=float)
+    hours = np.asarray(hours, dtype=int)
+    hour_corrections = {
+        int(hour): float(np.median(residual[hours == hour]))
+        for hour in np.unique(hours)
+        if np.any(hours == hour)
+    }
+    best = {"score": candidate_score(metrics(actual, pred, plant)), "correction": None, "pred": np.asarray(pred, dtype=float)}
+    for scale in HOURLY_CORRECTION_SCALE_GRID:
+        correction = {"scale": float(scale), "hour_corrections": hour_corrections}
+        candidate = apply_hourly_correction(pred, hours, plant, correction)
+        score = candidate_score(metrics(actual, candidate, plant))
+        if score < best["score"]:
+            best = {"score": score, "correction": correction, "pred": candidate}
+    return best["correction"], best["pred"]
+
+
+def same_hour_target_anchor(df, plant):
+    target = f"total_gen_{plant}"
+    col = f"{target}_target_lag24"
+    if col in df.columns:
+        return df[col].values.astype(float)
+    return df[target].shift(23).values.astype(float)
+
+
+def apply_profile_blend(pred, anchor, plant, config):
+    if not config:
+        return np.asarray(pred, dtype=float)
+    weight = float(config.get("weight", 0.0))
+    anchor = np.nan_to_num(np.asarray(anchor, dtype=float), nan=0.0)
+    return np.clip((1.0 - weight) * np.asarray(pred, dtype=float) + weight * anchor, 0.0, CAPACITY_MW[plant] * 1.05)
+
+
+def tune_profile_blend(plant, pred, actual, anchor):
+    best = {"score": candidate_score(metrics(actual, pred, plant)), "config": None, "pred": np.asarray(pred, dtype=float)}
+    for weight in PROFILE_BLEND_GRID:
+        config = {"weight": float(weight)}
+        candidate = apply_profile_blend(pred, anchor, plant, config)
+        score = candidate_score(metrics(actual, candidate, plant))
+        if score < best["score"]:
+            best = {"score": score, "config": config, "pred": candidate}
+    return best["config"], best["pred"]
+
+
+def apply_benchmark_calibration(pred, basis_current, plant, calibration, hours=None, anchor=None):
+    out = np.asarray(pred, dtype=float)
+    if not calibration:
+        return out
+    out = apply_bin_calibration(out, basis_current, plant, calibration.get("bin_calibration"))
+    if hours is not None:
+        out = apply_hourly_correction(out, hours, plant, calibration.get("hourly_residual_correction"))
+    if anchor is not None:
+        out = apply_profile_blend(out, anchor, plant, calibration.get("profile_blend"))
+    return np.clip(out, 0.0, CAPACITY_MW[plant] * 1.05)
+
+
+def apply_level_anchor_blend(pred, current, lag_anchor, plant, config):
+    if not config:
+        return np.asarray(pred, dtype=float)
+    weight = float(config.get("weight", 0.0))
+    current_weight = float(config.get("current_weight", 0.0))
+    current = np.nan_to_num(np.asarray(current, dtype=float), nan=0.0)
+    lag_anchor = np.nan_to_num(np.asarray(lag_anchor, dtype=float), nan=0.0)
+    anchor = current_weight * current + (1.0 - current_weight) * lag_anchor
+    out = (1.0 - weight) * np.asarray(pred, dtype=float) + weight * anchor
+    return np.clip(out, 0.0, CAPACITY_MW[plant] * 1.05)
+
+
+def tune_level_anchor_blend(plant, pred, actual, current, lag_anchor):
+    best = {"score": candidate_score(metrics(actual, pred, plant)), "config": None, "pred": np.asarray(pred, dtype=float)}
+    for current_weight in ANCHOR_CURRENT_WEIGHT_GRID:
+        for weight in ANCHOR_BLEND_GRID:
+            config = {"weight": float(weight), "current_weight": float(current_weight)}
+            candidate = apply_level_anchor_blend(pred, current, lag_anchor, plant, config)
+            score = candidate_score(metrics(actual, candidate, plant))
+            if score < best["score"]:
+                best = {"score": score, "config": config, "pred": candidate}
+    return best["config"], best["pred"]
+
+
+def benchmark_level_prediction(current, delta_pred, plant, calibration=None, hours=None, anchor=None):
+    calibration = calibration or {}
+    out = calibrated_level_prediction(current, delta_pred, plant, calibration)
+    out = apply_bin_calibration(out, current, plant, calibration.get("bin_calibration"))
+    if hours is not None:
+        out = apply_hourly_correction(out, hours, plant, calibration.get("hourly_residual_correction"))
+    if anchor is not None:
+        out = apply_profile_blend(out, anchor, plant, calibration.get("profile_blend"))
+        out = apply_level_anchor_blend(out, current, anchor, plant, calibration.get("level_anchor_blend"))
+    return np.clip(out, 0.0, CAPACITY_MW[plant] * 1.05)
+
+
+def with_payload_calibration(model_info, calibration):
+    model, model_feature_columns = unpack_model_payload(model_info)
+    return model_payload(model, model_feature_columns, calibration)
+
+
 # Formats Excel outputs for easier review and thesis reporting.
 def format_excel(path):
     try:
@@ -227,7 +430,7 @@ def update_model_selection_audit(section, rows):
         "primary_model": "RBFNN",
         "benchmark_models": ["Random Forest", "XGBoost"],
         "selection_rule": "lowest R2-aware validation score; score penalizes MAPE, RMSE, low R2, and especially negative R2",
-        "day_ahead_selection": "models are selected with validation-only screening and R2-aware rolling 24-hour validation backtests",
+        "day_ahead_selection": f"models are selected with validation-only screening and R2-aware rolling 24-hour validation backtests sampled across up to {SELECTION_DAY_AHEAD_MAX_DAYS} validation days",
         "testing_used_for_tuning": False,
         "metric_source": "real model predictions only",
     }
@@ -281,11 +484,12 @@ def align_features(X, model_features):
     return X[model_features]
 
 
-# Saves each model together with the feature columns used during training.
-def model_payload(model, model_feature_columns):
+# Saves each model together with the feature columns and validation-only calibration used during training.
+def model_payload(model, model_feature_columns, calibration=None):
     return {
         "model": model,
         "feature_columns": list(model_feature_columns),
+        "calibration": calibration or {},
     }
 
 
@@ -303,26 +507,40 @@ def unpack_model_payload(payload):
     return payload, model_features
 
 
+def model_calibration(payload):
+    if isinstance(payload, dict):
+        return payload.get("calibration") or {}
+    return {}
+
+
 # Persists one benchmark model and its feature list.
-def save_model_payload(model_key, plant, model, model_feature_columns):
+def save_model_payload(model_key, plant, model, model_feature_columns, calibration=None):
     joblib.dump(
-        model_payload(model, model_feature_columns),
+        model_payload(model, model_feature_columns, calibration),
         MODEL_DIRS[model_key] / f"{model_key}_{plant}.pkl",
     )
 
 
-def benchmark_search_configs(name):
+def benchmark_search_configs(name, plant=None):
     if name == "Random Forest":
-        return [
-            {"n_estimators": 400, "max_depth": None, "min_samples_leaf": 2, "max_features": "sqrt"},
-            {"n_estimators": 500, "max_depth": 18, "min_samples_leaf": 1, "max_features": 0.75},
-            {"n_estimators": 500, "max_depth": 24, "min_samples_leaf": 2, "max_features": 0.85},
+        configs = [
+            {"n_estimators": 240, "max_depth": 8, "min_samples_leaf": 6, "max_features": "sqrt"},
+            {"n_estimators": 300, "max_depth": 12, "min_samples_leaf": 4, "max_features": 0.55},
+            {"n_estimators": 360, "max_depth": 18, "min_samples_leaf": 2, "max_features": 0.75},
+            {"n_estimators": 420, "max_depth": None, "min_samples_leaf": 3, "max_features": 0.85},
         ]
+        if plant == "agus2":
+            configs.extend([
+                {"n_estimators": 300, "max_depth": 6, "min_samples_leaf": 10, "max_features": "sqrt"},
+                {"n_estimators": 360, "max_depth": 10, "min_samples_leaf": 12, "max_features": 0.40},
+            ])
+        return configs
     if name == "XGBoost":
         return [
-            {"n_estimators": 400, "learning_rate": 0.04, "max_depth": 3, "subsample": 0.90, "colsample_bytree": 0.90, "reg_lambda": 1.0},
-            {"n_estimators": 550, "learning_rate": 0.03, "max_depth": 4, "subsample": 0.90, "colsample_bytree": 0.90, "reg_lambda": 1.0},
-            {"n_estimators": 700, "learning_rate": 0.02, "max_depth": 4, "subsample": 0.85, "colsample_bytree": 0.85, "reg_lambda": 1.5},
+            {"n_estimators": 260, "learning_rate": 0.05, "max_depth": 3, "subsample": 0.95, "colsample_bytree": 0.95, "reg_lambda": 1.0},
+            {"n_estimators": 420, "learning_rate": 0.035, "max_depth": 3, "subsample": 0.90, "colsample_bytree": 0.90, "reg_lambda": 1.0},
+            {"n_estimators": 560, "learning_rate": 0.025, "max_depth": 4, "subsample": 0.88, "colsample_bytree": 0.85, "reg_lambda": 1.5},
+            {"n_estimators": 720, "learning_rate": 0.018, "max_depth": 4, "subsample": 0.85, "colsample_bytree": 0.80, "reg_lambda": 2.0},
         ]
     raise ValueError(f"Unsupported benchmark model: {name}")
 
@@ -369,7 +587,7 @@ def train_benchmark_model(name, plant, train, x_cols, y_col, val=None, raw_df=No
     target = f"total_gen_{plant}"
     val_actual = val[f"{target}_tplus1"].values.astype(float)
     screened = []
-    for config in benchmark_search_configs(name):
+    for config in benchmark_search_configs(name, plant):
         model = make_benchmark_model(name, config)
         print(f"Training {name} benchmark for {plant} with {config}")
         model.fit(X_train, train[y_col])
@@ -408,15 +626,122 @@ def train_benchmark_model(name, plant, train, x_cols, y_col, val=None, raw_df=No
             best = candidate
 
     model, _ = unpack_model_payload(best["payload"])
-    save_model_payload(MODEL_KEYS[name], plant, model, model_feature_columns)
+    val_delta = predict_aligned(best["payload"], val[x_cols].copy(), plant)
+    calibration, val_pred = fit_shrinkage_bias(
+        val[target].values.astype(float),
+        val_delta,
+        val_actual,
+        plant,
+    )
+    calibration_payload = with_payload_calibration(best["payload"], calibration)
+    calibrated_rolling_score, calibrated_rolling_metrics = rolling_benchmark_candidate_score(
+        raw_df,
+        validation_forecast_days,
+        name,
+        plant,
+        calibration_payload,
+    )
+    if calibrated_rolling_score <= best["rolling_score"]:
+        selected_calibration = calibration
+        selected_rolling_score = calibrated_rolling_score
+        selected_rolling_metrics = calibrated_rolling_metrics
+    else:
+        selected_calibration = {
+            "shrinkage": 1.0,
+            "bias_correction_mw": 0.0,
+            "bin_calibration": None,
+            "hourly_residual_correction": None,
+            "profile_blend": None,
+            "level_anchor_blend": None,
+        }
+        selected_rolling_score = best["rolling_score"]
+        selected_rolling_metrics = best["rolling_validation_metrics"]
+        val_pred = level_from_delta(val[target], val_delta, plant)
+
+    bin_candidate, bin_val_pred = tune_bin_calibration(plant, val[target].values.astype(float), val_actual, val_pred)
+    if bin_candidate:
+        trial_calibration = dict(selected_calibration)
+        trial_calibration["bin_calibration"] = bin_candidate
+        trial_payload = with_payload_calibration(best["payload"], trial_calibration)
+        trial_score, trial_metrics = rolling_benchmark_candidate_score(
+            raw_df, validation_forecast_days, name, plant, trial_payload
+        )
+        if trial_score <= selected_rolling_score:
+            selected_calibration = trial_calibration
+            selected_rolling_score = trial_score
+            selected_rolling_metrics = trial_metrics
+            val_pred = bin_val_pred
+
+    hourly_candidate, hourly_val_pred = tune_hourly_correction(plant, val_pred, val_actual, target_hours_from_rows(val))
+    if hourly_candidate:
+        trial_calibration = dict(selected_calibration)
+        trial_calibration["hourly_residual_correction"] = hourly_candidate
+        trial_payload = with_payload_calibration(best["payload"], trial_calibration)
+        trial_score, trial_metrics = rolling_benchmark_candidate_score(
+            raw_df, validation_forecast_days, name, plant, trial_payload
+        )
+        if trial_score <= selected_rolling_score:
+            selected_calibration = trial_calibration
+            selected_rolling_score = trial_score
+            selected_rolling_metrics = trial_metrics
+            val_pred = hourly_val_pred
+
+    profile_candidate, profile_val_pred = tune_profile_blend(
+        plant,
+        val_pred,
+        val_actual,
+        same_hour_target_anchor(val, plant),
+    )
+    if profile_candidate:
+        trial_calibration = dict(selected_calibration)
+        trial_calibration["profile_blend"] = profile_candidate
+        trial_payload = with_payload_calibration(best["payload"], trial_calibration)
+        trial_score, trial_metrics = rolling_benchmark_candidate_score(
+            raw_df, validation_forecast_days, name, plant, trial_payload
+        )
+        if trial_score <= selected_rolling_score:
+            selected_calibration = trial_calibration
+            selected_rolling_score = trial_score
+            selected_rolling_metrics = trial_metrics
+
+    anchor_candidate, anchor_val_pred = tune_level_anchor_blend(
+        plant,
+        val_pred,
+        val_actual,
+        val[target].values.astype(float),
+        same_hour_target_anchor(val, plant),
+    )
+    if anchor_candidate:
+        trial_calibration = dict(selected_calibration)
+        trial_calibration["level_anchor_blend"] = anchor_candidate
+        trial_payload = with_payload_calibration(best["payload"], trial_calibration)
+        trial_score, trial_metrics = rolling_benchmark_candidate_score(
+            raw_df, validation_forecast_days, name, plant, trial_payload
+        )
+        if trial_score <= selected_rolling_score:
+            selected_calibration = trial_calibration
+            selected_rolling_score = trial_score
+            selected_rolling_metrics = trial_metrics
+            val_pred = anchor_val_pred
+
+    best["payload"] = model_payload(model, model_feature_columns, selected_calibration)
+    save_model_payload(MODEL_KEYS[name], plant, model, model_feature_columns, selected_calibration)
     audit = {
         "model": name,
         "plant": plant,
         "feature_count": len(model_feature_columns),
         "selected_hyperparameters": best["config"],
         "one_step_validation_score": best["screen_score"],
-        "rolling_validation_score": best["rolling_score"],
-        "rolling_validation_metrics": best["rolling_validation_metrics"],
+        "rolling_validation_score": selected_rolling_score,
+        "rolling_validation_metrics": selected_rolling_metrics,
+        "calibration": {
+            "shrinkage": selected_calibration.get("shrinkage"),
+            "bias_correction_mw": selected_calibration.get("bias_correction_mw"),
+            "bin_calibration": bool(selected_calibration.get("bin_calibration")),
+            "hourly_residual_correction": bool(selected_calibration.get("hourly_residual_correction")),
+            "profile_blend": bool(selected_calibration.get("profile_blend")),
+            "level_anchor_blend": selected_calibration.get("level_anchor_blend"),
+        },
         "finalists": finalist_scores,
         "testing_used_for_selection_or_calibration": False,
     }
@@ -836,12 +1161,13 @@ def forecast_benchmark_24h(raw_df, planned, models_by_plant):
         for plant in PLANTS:
             target = f"total_gen_{plant}"
             model, model_features = unpack_model_payload(models_by_plant[plant])
+            calibration = model_calibration(models_by_plant[plant])
             x_row = feature_row_from_history(hist, plant, date_i, hour_i, model_features)
             if model_features:
                 x_row = align_features(x_row, model_features)
             delta = float(model.predict(x_row)[0])
             last_val = float(hist[target].iloc[-1])
-            pred = last_val + delta
+            pred = float(benchmark_level_prediction([last_val], [delta], plant, calibration, hours=[hour_i], anchor=[value_at_lag(hist, target, 23)])[0])
             diffs = hist[target].diff().abs().dropna()
             limit = float(max(1.0, diffs.quantile(0.98))) if not diffs.empty else 2.0
             pred = float(np.clip(pred, last_val - limit, last_val + limit))
@@ -892,6 +1218,14 @@ def day_ahead_backtest_days(raw_df):
         "validation": usable_days(raw_df.iloc[train_end:val_end].copy()),
         "testing": usable_days(raw_df.iloc[val_end:].copy()),
     }
+
+
+def model_selection_days(days):
+    days = list(days)
+    if len(days) <= SELECTION_DAY_AHEAD_MAX_DAYS:
+        return days
+    positions = np.linspace(0, len(days) - 1, SELECTION_DAY_AHEAD_MAX_DAYS).round().astype(int)
+    return [days[int(pos)] for pos in sorted(set(positions))]
 
 
 def outage_plan_from_history(history, forecast_day):
@@ -1048,12 +1382,13 @@ def forecast_benchmark_24h_backtest(history, planned, models_by_plant):
         for plant in PLANTS:
             target = f"total_gen_{plant}"
             model, model_features = unpack_model_payload(models_by_plant[plant])
+            calibration = model_calibration(models_by_plant[plant])
             x_row = fast_backtest_feature_row(hist.tail(FEATURE_HISTORY_WINDOW).copy(), plant, date_i, hour_i, model_features)
             if model_features:
                 x_row = align_features(x_row, model_features)
             delta = float(model.predict(x_row)[0])
             last_val = float(hist[target].iloc[-1])
-            pred = last_val + delta
+            pred = float(benchmark_level_prediction([last_val], [delta], plant, calibration, hours=[hour_i], anchor=[value_at_lag(hist, target, 23)])[0])
             diffs = hist[target].tail(FEATURE_HISTORY_WINDOW).diff().abs().dropna()
             limit = float(max(1.0, diffs.quantile(0.98))) if not diffs.empty else 2.0
             pred = float(np.clip(pred, last_val - limit, last_val + limit))
@@ -1083,6 +1418,7 @@ def rolling_benchmark_plant_predictions(raw_df, forecast_days, model_name, plant
     rows = []
     target = f"total_gen_{plant}"
     model, model_features = unpack_model_payload(model_info)
+    calibration = model_calibration(model_info)
     for day in forecast_days:
         actual_day = actual_forecast_day(raw_df, day)
         if len(actual_day) != 24:
@@ -1107,7 +1443,7 @@ def rolling_benchmark_plant_predictions(raw_df, forecast_days, model_name, plant
                 x_row = align_features(x_row, model_features)
             delta = float(model.predict(x_row)[0])
             last_val = float(hist[target].iloc[-1])
-            pred = last_val + delta
+            pred = float(benchmark_level_prediction([last_val], [delta], plant, calibration, hours=[hour_i], anchor=[value_at_lag(hist, target, 23)])[0])
             diffs = hist[target].tail(FEATURE_HISTORY_WINDOW).diff().abs().dropna()
             limit = float(max(1.0, diffs.quantile(0.98))) if not diffs.empty else 2.0
             pred = float(np.clip(pred, last_val - limit, last_val + limit))
@@ -1430,7 +1766,11 @@ def load_or_train_benchmark_models(raw_df):
                 saved_payload = joblib.load(model_path)
                 model, model_feature_columns = unpack_model_payload(saved_payload)
                 if model_feature_columns and set(current_features) == set(model_feature_columns):
-                    forecast_models[name][plant] = model_payload(model, model_feature_columns)
+                    forecast_models[name][plant] = model_payload(
+                        model,
+                        model_feature_columns,
+                        model_calibration(saved_payload),
+                    )
                     retrain_model = False
                     print(f"Loaded {name} model for {plant}")
                 else:
@@ -1465,8 +1805,23 @@ def save_saved_model_metrics_and_predictions(raw_df, forecast_models):
             leakage_check = leakage_feature_audit(model_feature_columns or x_cols)
             val_delta_pred = predict_aligned(model_info, val[x_cols].copy(), plant)
             test_delta_pred = predict_aligned(model_info, test[x_cols].copy(), plant)
-            val_pred = level_from_delta(val[target], val_delta_pred, plant)
-            test_pred = level_from_delta(test[target], test_delta_pred, plant)
+            calibration = model_calibration(model_info)
+            val_pred = benchmark_level_prediction(
+                val[target].values.astype(float),
+                val_delta_pred,
+                plant,
+                calibration,
+                hours=target_hours_from_rows(val),
+                anchor=same_hour_target_anchor(val, plant),
+            )
+            test_pred = benchmark_level_prediction(
+                test[target].values.astype(float),
+                test_delta_pred,
+                plant,
+                calibration,
+                hours=target_hours_from_rows(test),
+                anchor=same_hour_target_anchor(test, plant),
+            )
             val_actual = val[f"{target}_tplus1"].values.astype(float)
             test_actual = test[f"{target}_tplus1"].values.astype(float)
             val_m = metrics(val_actual, val_pred, plant)
@@ -1533,7 +1888,7 @@ def run_forecast_only():
         safe_name = name.upper().replace(" ", "_")
         save_forecast_outputs(forecast, model_key, safe_name)
     print("Benchmark forecasts complete")
-    print("Saved benchmark forecasts:", BENCHMARK_DIR)
+    print("Saved benchmark forecasts:", OUT_DIR)
     if "--day-ahead-backtest" in sys.argv:
         save_benchmark_day_ahead_backtests(raw_df, forecast_models)
 
@@ -1615,7 +1970,12 @@ def run_training_and_forecast():
     forecast_models = {"Random Forest": {}, "XGBoost": {}}
     fairness_rows = []
     selection_audit_rows = []
-    validation_forecast_days = day_ahead_backtest_days(raw_df)["validation"]
+    all_validation_forecast_days = day_ahead_backtest_days(raw_df)["validation"]
+    validation_forecast_days = model_selection_days(all_validation_forecast_days)
+    print(
+        f"Benchmark model selection day-ahead sample: "
+        f"{len(validation_forecast_days)} of {len(all_validation_forecast_days)} validation days"
+    )
 
     for plant in PLANTS:
         if selected_plants and plant not in selected_plants:
@@ -1648,8 +2008,23 @@ def run_training_and_forecast():
             leakage_check = leakage_feature_audit(model_feature_columns)
             val_delta_pred = predict_aligned(model_info, val[x_cols].copy(), plant)
             test_delta_pred = predict_aligned(model_info, test[x_cols].copy(), plant)
-            val_pred = level_from_delta(val[target], val_delta_pred, plant)
-            test_pred = level_from_delta(test[target], test_delta_pred, plant)
+            calibration = model_calibration(model_info)
+            val_pred = benchmark_level_prediction(
+                val[target].values.astype(float),
+                val_delta_pred,
+                plant,
+                calibration,
+                hours=target_hours_from_rows(val),
+                anchor=same_hour_target_anchor(val, plant),
+            )
+            test_pred = benchmark_level_prediction(
+                test[target].values.astype(float),
+                test_delta_pred,
+                plant,
+                calibration,
+                hours=target_hours_from_rows(test),
+                anchor=same_hour_target_anchor(test, plant),
+            )
             val_actual = val[f"{target}_tplus1"].values.astype(float)
             test_actual = test[f"{target}_tplus1"].values.astype(float)
             val_m = metrics(val_actual, val_pred, plant)
@@ -1732,7 +2107,7 @@ def run_training_and_forecast():
     print(result.to_string(index=False))
     print("Saved:", rf_metrics_path)
     print("Saved:", xgb_metrics_path)
-    print("Saved benchmark forecasts:", BENCHMARK_DIR)
+    print("Saved benchmark forecasts:", OUT_DIR)
 
 
 # Selects training mode when --train is passed; otherwise runs forecast-only mode.

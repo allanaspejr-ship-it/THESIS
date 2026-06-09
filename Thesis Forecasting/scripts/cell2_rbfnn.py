@@ -130,13 +130,13 @@ EPOCHS = 80
 BATCH_SIZE = 32
 N_CENTERS = 120
 LEARNING_RATE = 0.001
-SEARCH_CENTER_COUNTS = [60, 80, 120, 180]
-SEARCH_LEARNING_RATES = [0.001, 0.0007, 0.0005, 0.0003]
+SEARCH_CENTER_COUNTS = [40, 60, 80, 120, 160, 180, 220]
+SEARCH_LEARNING_RATES = [0.0012, 0.001, 0.0007, 0.0005, 0.0003, 0.0002]
 SEARCH_GAMMA_INITS = [0.5, 1.0, 2.0]
 SEARCH_BATCH_SIZES = [16, 32]
 SEARCH_PATIENCES = [8, 12, 16]
-RBFNN_FINALIST_COUNT = 6
-R2_WEIGHT = 8.0
+RBFNN_FINALIST_COUNT = 10
+R2_WEIGHT = 20.0
 NEGATIVE_R2_PENALTY = 25.0
 SHRINKAGE_GRID = [0.05, 0.10, 0.20, 0.35, 0.50, 0.75, 1.00, 1.15]
 BIN_CALIBRATION_PLANTS = set(PLANTS)
@@ -145,8 +145,8 @@ BIN_CALIBRATION_QUANTILES_BY_PLANT = {"agus1": list(range(3, 41))}
 BIN_CALIBRATION_SCALES = [round(x, 2) for x in np.arange(0.50, 2.55, 0.05)]
 BIN_CALIBRATION_BASIS = {"agus1": "base_pred", "agus5": "current"}
 SHAPE_OPTIMIZED_PLANTS = set(PLANTS)
-PROFILE_BLEND_GRID = [0.0, 0.10, 0.20, 0.30, 0.40, 0.55, 0.70]
-HOURLY_CORRECTION_SCALE_GRID = [0.0, 0.25, 0.50, 0.75, 1.00]
+PROFILE_BLEND_GRID = [0.0, 0.10, 0.20, 0.30, 0.40, 0.55, 0.70, 0.85]
+HOURLY_CORRECTION_SCALE_GRID = [0.0, 0.25, 0.50, 0.75, 1.00, 1.25]
 ACTUAL_NEXT_DAY_PATH = PROJECT_DIR / "july 1, 2025.xlsx"
 FEATURE_HISTORY_WINDOW = 240
 DAY_AHEAD_EVALUATION_TYPE = "rolling_24h_day_ahead_backtest"
@@ -660,29 +660,56 @@ def rolling_selection_score(plant, metrics):
 
 def rbfnn_search_configs(plant):
     base = [
+        {"n_centers": 40, "learning_rate": 0.0012, "gamma_init": 1.0, "batch_size": 32, "patience": 8},
         {"n_centers": 60, "learning_rate": 0.0010, "gamma_init": 1.0, "batch_size": 32, "patience": 8},
+        {"n_centers": 60, "learning_rate": 0.0005, "gamma_init": 0.5, "batch_size": 16, "patience": 16},
         {"n_centers": 80, "learning_rate": 0.0010, "gamma_init": 0.5, "batch_size": 32, "patience": 12},
         {"n_centers": 80, "learning_rate": 0.0007, "gamma_init": 2.0, "batch_size": 16, "patience": 12},
         {"n_centers": 120, "learning_rate": 0.0010, "gamma_init": 1.0, "batch_size": 32, "patience": 12},
         {"n_centers": 120, "learning_rate": 0.0007, "gamma_init": 0.5, "batch_size": 16, "patience": 16},
         {"n_centers": 120, "learning_rate": 0.0005, "gamma_init": 2.0, "batch_size": 32, "patience": 16},
+        {"n_centers": 160, "learning_rate": 0.0005, "gamma_init": 1.0, "batch_size": 32, "patience": 16},
         {"n_centers": 180, "learning_rate": 0.0005, "gamma_init": 1.0, "batch_size": 32, "patience": 16},
         {"n_centers": 180, "learning_rate": 0.0003, "gamma_init": 0.5, "batch_size": 16, "patience": 16},
+        {"n_centers": 220, "learning_rate": 0.0002, "gamma_init": 0.5, "batch_size": 16, "patience": 20},
     ]
     plant_extra = {
         "agus1": [
             {"n_centers": 60, "learning_rate": 0.0007, "gamma_init": 2.0, "batch_size": 16, "patience": 12},
+            {"n_centers": 80, "learning_rate": 0.0003, "gamma_init": 1.0, "batch_size": 16, "patience": 20},
+            {"n_centers": 120, "learning_rate": 0.0002, "gamma_init": 0.5, "batch_size": 16, "patience": 24},
+            {"n_centers": 160, "learning_rate": 0.0003, "gamma_init": 1.0, "batch_size": 16, "patience": 20},
+            {"n_centers": 220, "learning_rate": 0.0002, "gamma_init": 1.0, "batch_size": 16, "patience": 24},
+        ],
+        "agus2": [
+            {"n_centers": 40, "learning_rate": 0.0007, "gamma_init": 2.0, "batch_size": 16, "patience": 16},
+            {"n_centers": 60, "learning_rate": 0.0003, "gamma_init": 1.0, "batch_size": 16, "patience": 20},
+            {"n_centers": 80, "learning_rate": 0.0002, "gamma_init": 0.5, "batch_size": 16, "patience": 24},
+            {"n_centers": 120, "learning_rate": 0.0002, "gamma_init": 1.0, "batch_size": 16, "patience": 24},
+            {"n_centers": 160, "learning_rate": 0.0003, "gamma_init": 0.5, "batch_size": 16, "patience": 20},
+            {"n_centers": 220, "learning_rate": 0.0002, "gamma_init": 2.0, "batch_size": 16, "patience": 24},
+        ],
+        "agus4": [
+            {"n_centers": 80, "learning_rate": 0.0003, "gamma_init": 2.0, "batch_size": 16, "patience": 20},
+            {"n_centers": 120, "learning_rate": 0.0002, "gamma_init": 0.5, "batch_size": 16, "patience": 24},
+            {"n_centers": 160, "learning_rate": 0.0007, "gamma_init": 1.0, "batch_size": 32, "patience": 16},
+            {"n_centers": 180, "learning_rate": 0.0002, "gamma_init": 1.0, "batch_size": 16, "patience": 24},
+            {"n_centers": 220, "learning_rate": 0.0003, "gamma_init": 1.0, "batch_size": 16, "patience": 20},
+            {"n_centers": 260, "learning_rate": 0.0002, "gamma_init": 0.5, "batch_size": 16, "patience": 24},
         ],
         "agus5": [
             {"n_centers": 80, "learning_rate": 0.0005, "gamma_init": 0.5, "batch_size": 16, "patience": 16},
             {"n_centers": 120, "learning_rate": 0.0003, "gamma_init": 1.0, "batch_size": 16, "patience": 16},
+            {"n_centers": 220, "learning_rate": 0.0002, "gamma_init": 1.0, "batch_size": 16, "patience": 20},
         ],
         "agus6": [
             {"n_centers": 180, "learning_rate": 0.0007, "gamma_init": 0.5, "batch_size": 32, "patience": 16},
+            {"n_centers": 220, "learning_rate": 0.0003, "gamma_init": 0.5, "batch_size": 16, "patience": 20},
         ],
         "agus7": [
             {"n_centers": 80, "learning_rate": 0.0005, "gamma_init": 1.0, "batch_size": 16, "patience": 16},
             {"n_centers": 120, "learning_rate": 0.0003, "gamma_init": 0.5, "batch_size": 16, "patience": 16},
+            {"n_centers": 160, "learning_rate": 0.0002, "gamma_init": 1.0, "batch_size": 16, "patience": 20},
         ],
     }
     configs = base + plant_extra.get(plant, [])
@@ -1899,11 +1926,14 @@ def tune_saved_day_ahead_profile_blends(raw_df):
 
         meta_path = MODEL_DIR / f"meta_{plant}.json"
         meta = json.loads(meta_path.read_text())
+        base_score = rolling_selection_score(plant, base_metrics)
+        best_score = rolling_selection_score(plant, best["metrics"])
         robust_improvement = (
             best["weight"] > 0
-            and best["metrics"]["operational_mape"] < base_metrics["operational_mape"] - 0.25
-            and best["metrics"]["rmse"] < base_metrics["rmse"] - 0.25
-            and best["metrics"]["r2"] >= 0.60
+            and best_score < base_score
+            and best["metrics"]["operational_mape"] < base_metrics["operational_mape"]
+            and best["metrics"]["rmse"] <= base_metrics["rmse"]
+            and best["metrics"]["r2"] >= base_metrics["r2"]
         )
         if robust_improvement:
             meta["day_ahead_profile_blend"] = {
@@ -2454,7 +2484,6 @@ def run_training_and_forecast():
             "testing_used_for_calibration": "No",
             "model_type": "RBFNN residual/delta model anchored to persistence",
         }, indent=2))
-
         calibration_report_rows.append({
             "plant": plant,
             "feature_count": len(x_cols),
