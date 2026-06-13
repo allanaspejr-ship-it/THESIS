@@ -411,7 +411,7 @@ def generate_cleaned_profile_figures():
             raise ValueError(f"Missing cleaned profile column: {column}")
         plt.figure(figsize=(12, 5))
         plt.plot(df["datetime"], df[column], linewidth=0.8, color="#1f77b4")
-        plt.title(f"Figure 4.{idx}: Cleaned Generation Profile - {PLANT_LABELS[plant]}")
+        plt.title(f"Cleaned Hourly Generation Profile of {PLANT_LABELS[plant]}")
         plt.xlabel("Datetime")
         plt.ylabel("Generation (MW)")
         plt.grid(True, alpha=0.25)
