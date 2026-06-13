@@ -611,11 +611,20 @@ def main():
         planned[c] = int(last_row[c]) if c in df_outage.columns and pd.notna(last_row[c]) else 1
 
     outage_path = DIRS["outages"] / "Planned_Outages_Input.xlsx"
-    planned.to_excel(outage_path, index=False)
-    format_excel(outage_path)
+    saved_outage_path = outage_path
+    try:
+        planned.to_excel(outage_path, index=False)
+        format_excel(outage_path)
+    except PermissionError:
+        timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
+        saved_outage_path = outage_path.with_name(f"{outage_path.stem}_regenerated_{timestamp}{outage_path.suffix}")
+        planned.to_excel(saved_outage_path, index=False)
+        format_excel(saved_outage_path)
+        print(f"\nWarning: could not overwrite locked outage workbook: {outage_path}")
+        print("Close the workbook in Excel, then rerun cleaning if you need to replace the main outage template.")
 
     print("\nDone: Planned outage template")
-    print("Saved:", outage_path)
+    print("Saved:", saved_outage_path)
     print("\nCleaned data preview:")
     print(clean_df.head())
 

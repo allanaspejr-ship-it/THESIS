@@ -391,6 +391,18 @@ def format_excel(path):
     wb.save(path)
 
 
+def normalize_export_column_name(column):
+    return str(column).strip().lower().replace(" ", "_").replace("-", "_")
+
+
+def prepare_forecast_export(df):
+    drop_columns = [
+        col for col in df.columns
+        if normalize_export_column_name(col) in {"forecast_hour", "datetime"}
+    ]
+    return df.drop(columns=drop_columns, errors="ignore")
+
+
 def save_benchmark_fairness_audit(rows):
     path = META_DIR / "benchmark_fairness_audit.xlsx"
     columns = [
@@ -1121,8 +1133,9 @@ def load_planned():
 # ============================================================
 
 # Builds one forecast feature row from the latest historical data.
-def feature_row_from_history(hist, plant, date_val, hour_val, model_features=None):
-    hist_feat = add_features(hist.copy())
+def feature_row_from_history(hist, plant, date_val, hour_val, model_features=None, hist_feat=None):
+    if hist_feat is None:
+        hist_feat = add_features(hist.tail(FEATURE_HISTORY_WINDOW).copy())
     x_cols = list(model_features) if model_features else feature_cols(hist_feat, plant)
     row = hist_feat.iloc[-1].to_dict()
     dt = pd.to_datetime(date_val) + pd.Timedelta(hours=int(hour_val) - 1)
@@ -1153,6 +1166,7 @@ def forecast_benchmark_24h(raw_df, planned, models_by_plant):
     for step in range(24):
         date_i = planned.loc[step, "Date"]
         hour_i = int(planned.loc[step, "Hour"])
+        hist_feat = add_features(hist.tail(FEATURE_HISTORY_WINDOW).copy())
         new_row = hist.iloc[-1].copy()
         new_row["date"] = pd.to_datetime(date_i)
         new_row["time"] = hour_i
@@ -1162,7 +1176,7 @@ def forecast_benchmark_24h(raw_df, planned, models_by_plant):
             target = f"total_gen_{plant}"
             model, model_features = unpack_model_payload(models_by_plant[plant])
             calibration = model_calibration(models_by_plant[plant])
-            x_row = feature_row_from_history(hist, plant, date_i, hour_i, model_features)
+            x_row = feature_row_from_history(hist, plant, date_i, hour_i, model_features, hist_feat=hist_feat)
             if model_features:
                 x_row = align_features(x_row, model_features)
             delta = float(model.predict(x_row)[0])
@@ -1685,15 +1699,16 @@ def save_forecast_outputs(forecast, model_key, safe_name):
     xlsx_path = out_dir / f"Day_Ahead_24H_{safe_name}.xlsx"
     csv_path = out_dir / f"Day_Ahead_24H_{safe_name}.csv"
     output_forecast = format_forecast_output(forecast)
+    export_forecast = prepare_forecast_export(output_forecast)
     try:
-        output_forecast.to_excel(xlsx_path, index=False)
+        export_forecast.to_excel(xlsx_path, index=False)
         format_excel(xlsx_path)
     except PermissionError:
         fallback_xlsx = out_dir / f"Day_Ahead_24H_{safe_name}_regenerated.xlsx"
-        output_forecast.to_excel(fallback_xlsx, index=False)
+        export_forecast.to_excel(fallback_xlsx, index=False)
         format_excel(fallback_xlsx)
         print(f"Workbook locked, saved fallback: {fallback_xlsx}")
-    output_forecast.to_csv(csv_path, index=False)
+    export_forecast.to_csv(csv_path, index=False)
     print("Saved:", xlsx_path)
     print("Saved:", csv_path)
 
@@ -1733,16 +1748,37 @@ def warn_if_saved_benchmarks_missing_rainfall_features(raw_df):
         )
 
 
+# Parses optional benchmark model filters for fast forecast-only dashboard calls.
+def selected_benchmark_model_keys_from_args():
+    selected = None
+    for flag in ["--model", "--models"]:
+        if flag in sys.argv:
+            idx = sys.argv.index(flag)
+            if idx + 1 >= len(sys.argv):
+                raise ValueError(f"{flag} requires a value: random_forest, xgboost, or both separated by commas.")
+            selected = [item.strip().lower() for item in sys.argv[idx + 1].split(",") if item.strip()]
+            break
+    if selected is None:
+        return None
+    valid = set(MODEL_KEYS.values())
+    invalid = sorted(set(selected) - valid)
+    if invalid:
+        raise ValueError(f"Unknown benchmark model(s): {invalid}. Valid choices: {sorted(valid)}")
+    return selected
+
+
 # Loads all saved Random Forest and XGBoost models.
-def load_saved_benchmark_models():
+def load_saved_benchmark_models(selected_model_keys=None):
     forecast_models = {"Random Forest": {}, "XGBoost": {}}
     for name, model_key in MODEL_KEYS.items():
+        if selected_model_keys is not None and model_key not in selected_model_keys:
+            continue
         for plant in PLANTS:
             model_path = model_file(model_key, f"{model_key}_{plant}.pkl")
             if not model_path.exists():
                 raise FileNotFoundError(f"Missing saved {name} model: {model_path}. Run with --train first.")
             forecast_models[name][plant] = joblib.load(model_path)
-    return forecast_models
+    return {name: models for name, models in forecast_models.items() if models}
 
 
 # Loads saved benchmark models or trains missing/mismatched models.
@@ -1875,6 +1911,19 @@ def save_saved_model_metrics_and_predictions(raw_df, forecast_models):
         print("Saved:", metrics_path)
         print("Saved:", predictions_path)
     save_benchmark_fairness_audit(fairness_rows)
+
+
+# Uses saved benchmark models to generate only operational 24-hour forecasts.
+def run_fast_forecast_only():
+    raw_df, planned = load_latest_inputs()
+    forecast_models = load_saved_benchmark_models(selected_benchmark_model_keys_from_args())
+    for name, models_by_plant in forecast_models.items():
+        forecast = forecast_benchmark_24h(raw_df, planned, models_by_plant)
+        model_key = name.lower().replace(" ", "_")
+        safe_name = name.upper().replace(" ", "_")
+        save_forecast_outputs(forecast, model_key, safe_name)
+    print("Benchmark fast forecast-only mode complete")
+    print("Saved benchmark forecasts:", OUT_DIR)
 
 
 # Uses saved or retrained benchmark models to evaluate metrics and forecast 24 hours.
@@ -2114,6 +2163,8 @@ def run_training_and_forecast():
 def main():
     if "--audit-only" in sys.argv:
         save_loaded_benchmark_selection_audit()
+    elif "--forecast-only" in sys.argv and "--train" not in sys.argv:
+        run_fast_forecast_only()
     elif "--day-ahead-backtest" in sys.argv and "--train" not in sys.argv:
         run_day_ahead_backtest_only()
     elif "--train" in sys.argv:

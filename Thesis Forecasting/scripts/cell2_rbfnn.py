@@ -208,6 +208,18 @@ def format_excel(path):
     wb.save(path)
 
 
+def normalize_export_column_name(column):
+    return str(column).strip().lower().replace(" ", "_").replace("-", "_")
+
+
+def prepare_forecast_export(df):
+    drop_columns = [
+        col for col in df.columns
+        if normalize_export_column_name(col) in {"forecast_hour", "datetime"}
+    ]
+    return df.drop(columns=drop_columns, errors="ignore")
+
+
 def leakage_feature_audit(feature_columns, plant):
     forbidden_patterns = [
         r"_tplus1$",
@@ -2182,8 +2194,9 @@ def run_forecast_only():
     output_forecast = format_forecast_output(forecast)
     xlsx_path = RBFNN_FORECAST_DIR / "Day_Ahead_24H_RBFNN_Forecast.xlsx"
     csv_path = RBFNN_FORECAST_DIR / "Day_Ahead_24H_RBFNN_Forecast.csv"
-    output_forecast.to_excel(xlsx_path, index=False)
-    output_forecast.to_csv(csv_path, index=False)
+    export_forecast = prepare_forecast_export(output_forecast)
+    export_forecast.to_excel(xlsx_path, index=False)
+    export_forecast.to_csv(csv_path, index=False)
     format_excel(xlsx_path)
     print("Fast forecast-only mode complete")
     print("Saved:", xlsx_path)
@@ -2541,8 +2554,9 @@ def run_training_and_forecast():
         output_forecast = format_forecast_output(forecast)
         forecast_xlsx = RBFNN_FORECAST_DIR / "Day_Ahead_24H_RBFNN_Forecast.xlsx"
         forecast_csv = RBFNN_FORECAST_DIR / "Day_Ahead_24H_RBFNN_Forecast.csv"
-        output_forecast.to_excel(forecast_xlsx, index=False)
-        output_forecast.to_csv(forecast_csv, index=False)
+        export_forecast = prepare_forecast_export(output_forecast)
+        export_forecast.to_excel(forecast_xlsx, index=False)
+        export_forecast.to_csv(forecast_csv, index=False)
         format_excel(forecast_xlsx)
         print("Saved:", forecast_xlsx)
         print("Saved:", forecast_csv)
