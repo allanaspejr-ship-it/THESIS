@@ -1,0 +1,516 @@
+PROTOTYPE DASHBOARD REFERENCE
+Streamlit-Based Operating Guide for the Agus Hydropower Forecasting Prototype
+
+============================================================
+1. PURPOSE
+============================================================
+
+This guide explains how to operate the Streamlit dashboard for the thesis
+forecasting prototype. The dashboard provides a graphical interface for data
+management, planned outage editing, day-ahead forecasting, forecast review, and
+system status checking.
+
+Main dashboard file:
+
+Thesis Forecasting/scripts/streamlit_app.py
+
+Windows launcher:
+
+Thesis Forecasting/RUN_DASHBOARD.bat
+
+The dashboard supports these forecasting models:
+
+1. RBFNN
+2. Random Forest
+3. XGBoost
+
+The RBFNN is the main study model. Random Forest and XGBoost are benchmark
+models used for comparison.
+
+
+============================================================
+2. REQUIRED PROJECT STRUCTURE
+============================================================
+
+Open and run the system from the Thesis Forecasting folder.
+
+Important folders and files:
+
+data/
+- Contains the raw Excel data workbook.
+
+scripts/
+- Contains the dashboard and processing scripts.
+
+models/
+- Contains saved model artifacts for forecast-only operation.
+
+outputs/
+- Contains cleaned data, planned outage input, and operational forecasts.
+
+metadata/
+- Contains metrics, testing predictions, backtest outputs, and audit files.
+
+benchmark/
+- Contains benchmark model outputs and related files.
+
+thesis_figures/
+- Contains thesis-ready graphs and figures.
+
+
+============================================================
+3. REQUIRED INPUT FILES
+============================================================
+
+Raw data workbook:
+
+Thesis Forecasting/data/DATA(JAN2024-JUNE2025).xlsx
+
+Cleaned data outputs created by Cell 1:
+
+Thesis Forecasting/outputs/cleaned_data/cleaned_hourly_data.xlsx
+Thesis Forecasting/outputs/cleaned_data/cleaned_hourly_data.parquet
+
+Planned outage workbook:
+
+Thesis Forecasting/outputs/outages_planning/Planned_Outages_Input.xlsx
+
+The planned outage workbook contains 24 forecast hours. Unit status values use:
+
+1 = ON / available / running
+0 = OFF / unavailable / planned outage
+
+
+============================================================
+4. STARTING THE DASHBOARD
+============================================================
+
+Option A: Start with the Windows launcher
+
+1. Open the folder:
+
+   Thesis Forecasting
+
+2. Double-click:
+
+   RUN_DASHBOARD.bat
+
+3. Wait for the terminal to start Streamlit.
+4. Open the browser page shown by Streamlit.
+
+Default local address:
+
+http://localhost:8501
+
+
+Option B: Start from VS Code or terminal
+
+1. Open VS Code.
+2. Open the folder:
+
+   Thesis Forecasting
+
+3. Open a terminal.
+4. Run:
+
+   python -m streamlit run scripts\streamlit_app.py
+
+5. Keep the terminal open while using the dashboard.
+
+If the terminal is closed, the Streamlit dashboard stops.
+
+
+============================================================
+5. DASHBOARD NAVIGATION
+============================================================
+
+The sidebar contains five pages:
+
+1. Dashboard Overview
+2. Data Management
+3. Planned Outage Planning
+4. Forecast
+5. System Information
+
+Use the sidebar radio buttons to move between pages.
+
+
+============================================================
+6. PAGE 1: DASHBOARD OVERVIEW
+============================================================
+
+Purpose:
+
+Use this page to check the current state of the forecasting system.
+
+Main information shown:
+
+1. Total Cascade Forecast
+2. Peak Cascade Output
+3. Unavailable Unit-Hours
+4. Latest Cleaned Timestamp
+5. Latest Forecast Timestamp
+6. Hourly total generation chart per Agus plant
+7. Daily total generation chart per Agus plant
+8. Recent activity and file status
+9. Forecast file status for RBFNN, Random Forest, and XGBoost
+10. Testing error CDF section
+
+Operating steps:
+
+1. Open the Dashboard Overview page.
+2. Select the model to inspect in the Overview Forecast Model control.
+3. Check whether raw data, cleaned data, outage plan, and forecast files are
+   available.
+4. Review the hourly and daily charts if a valid forecast file exists.
+5. Use the CDF testing section to compare held-out testing error behavior.
+
+Interpretation notes:
+
+- A forecast file must already exist before charts can be displayed.
+- File timestamps show when the source or output files were last modified.
+- The CDF section uses held-out rolling 24-hour day-ahead testing prediction
+  workbooks, not the current operational forecast workbook.
+
+
+============================================================
+7. PAGE 2: DATA MANAGEMENT
+============================================================
+
+Purpose:
+
+Use this page to upload or refresh raw data and run the cleaning workflow.
+
+Controls:
+
+Upload Excel File
+- Replaces the raw Excel workbook used by the cleaning script.
+
+Refresh Data From Disk
+- Clears cached dashboard data and reloads files from disk.
+
+Run Data Cleaning
+- Runs Cell 1:
+
+  python scripts/cell1_clean_data.py
+
+Operating steps:
+
+1. Open the Data Management page.
+2. If a new raw workbook is available, upload it using Upload Excel File or
+   manually place it in:
+
+   Thesis Forecasting/data/DATA(JAN2024-JUNE2025).xlsx
+
+3. Click Refresh Data From Disk if the file was changed outside the dashboard.
+4. Click Run Data Cleaning when the raw data changed or cleaned data is missing.
+5. Wait until the script result indicates completion.
+6. Confirm that cleaned data status, row count, column count, and latest cleaned
+   timestamp are updated.
+
+Outputs created or updated by Run Data Cleaning:
+
+Thesis Forecasting/outputs/cleaned_data/cleaned_hourly_data.xlsx
+Thesis Forecasting/outputs/cleaned_data/cleaned_hourly_data.parquet
+Thesis Forecasting/outputs/cleaned_data/cell1_metadata.json
+Thesis Forecasting/outputs/outages_planning/Planned_Outages_Input.xlsx
+
+Important notes:
+
+- Run Data Cleaning only when the raw data changed or cleaned files are missing.
+- Cell 1 also creates or refreshes the 24-hour planned outage template.
+- If the planned outage workbook is open in Excel, the script may save a
+  regenerated fallback file instead of overwriting the locked workbook.
+
+
+============================================================
+8. PAGE 3: PLANNED OUTAGE PLANNING
+============================================================
+
+Purpose:
+
+Use this page to edit planned unit availability for the next 24-hour forecast.
+
+Input rule:
+
+1 = unit available / ON
+0 = unit unavailable / OFF / planned outage
+
+Operating steps:
+
+1. Open the Planned Outage Planning page.
+2. Review the outage KPI cards:
+
+   Unavailable Unit-Hours
+   Available Unit-Hours
+   Affected Plants
+   Outage Plan Last Modified
+
+3. Edit unit availability values in the table.
+4. Use only 1 or 0 in outage/status columns.
+5. Click Save Outage Plan.
+6. Confirm that the page reports the outage plan was saved.
+
+Forecasting from this page:
+
+1. After editing and saving outage values, click Forecast Day-Ahead.
+2. The dashboard saves the edited outage plan.
+3. The dashboard validates that cleaned data, outage plan, and saved models are
+   available.
+4. The dashboard runs forecast-only mode for:
+
+   RBFNN
+   Random Forest
+   XGBoost
+
+5. Wait until the dashboard reports that day-ahead forecasts completed.
+6. Go to the Forecast page to inspect charts, tables, and downloads.
+
+Buttons:
+
+Save Outage Plan
+- Saves the current 24-hour outage table to:
+
+  outputs/outages_planning/Planned_Outages_Input.xlsx
+
+Forecast Day-Ahead
+- Runs fast forecast-only operation for all three models.
+- Does not retrain models.
+- Uses saved model artifacts and the saved outage plan.
+
+Retrain RBFNN Model
+- Runs:
+
+  python scripts/cell2_rbfnn.py --train
+
+Retrain Benchmark Models
+- Runs:
+
+  python scripts/cell3_benchmark.py --train
+
+Recommended daily use:
+
+Use Forecast Day-Ahead for normal operations. Use retraining only when new
+cleaned data should be learned by the models, model files are missing, or model
+performance must be refreshed.
+
+
+============================================================
+9. PAGE 4: FORECAST
+============================================================
+
+Purpose:
+
+Use this page to run, view, compare, and download operational 24-hour forecasts.
+
+Model selector:
+
+Choose one of:
+
+1. RBFNN
+2. Random Forest
+3. XGBoost
+
+Buttons:
+
+Run selected model Forecast
+- Runs forecast-only mode for the selected model.
+
+Refresh Forecast Files
+- Clears cached dashboard data and reloads forecast workbooks from disk.
+
+Operating steps:
+
+1. Open the Forecast page.
+2. Select the forecast model.
+3. Click Run selected model Forecast if a new forecast is needed.
+4. Wait for the script result and success message.
+5. Review the KPI cards:
+
+   Total Cascade Forecast
+   Peak Cascade Output
+   Affected Plants
+   Forecast Generated
+
+6. Select the Forecast View:
+
+   Total Cascade
+   All Plants
+   Agus 1
+   Agus 2
+   Agus 4
+   Agus 5
+   Agus 6
+   Agus 7
+
+7. Review the chart and summary metrics.
+8. Review the forecast table.
+9. Click Download Forecast Excel if an export is needed.
+
+Forecast output files:
+
+RBFNN:
+
+outputs/rbfnn_forecast/Day_Ahead_24H_RBFNN_Forecast.xlsx
+outputs/rbfnn_forecast/Day_Ahead_24H_RBFNN_Forecast.csv
+
+Random Forest:
+
+outputs/random_forest_forecast/Day_Ahead_24H_RANDOM_FOREST.xlsx
+outputs/random_forest_forecast/Day_Ahead_24H_RANDOM_FOREST.csv
+
+XGBoost:
+
+outputs/xgboost_forecast/Day_Ahead_24H_XGBOOST.xlsx
+outputs/xgboost_forecast/Day_Ahead_24H_XGBOOST.csv
+
+Cascade comparison section:
+
+1. Select visible models.
+2. Choose display style:
+
+   Line and Markers
+   Lines Only
+
+3. Choose Y-axis behavior:
+
+   Automatic Range
+   Start at Zero
+
+4. Optionally enable Show hourly model spread.
+5. Review summary and model difference tables.
+
+
+============================================================
+10. PAGE 5: SYSTEM INFORMATION
+============================================================
+
+Purpose:
+
+Use this page to confirm workflow order, file availability, and runtime
+environment information.
+
+The page summarizes:
+
+1. Forecasting workflow
+2. File status overview
+3. Python and Streamlit information
+4. Forecast model scope
+5. Forecast horizon
+6. Last system check
+
+Recommended use:
+
+Open this page when troubleshooting missing input files, missing forecast
+outputs, or environment problems.
+
+
+============================================================
+11. NORMAL DAILY OPERATING WORKFLOW
+============================================================
+
+Use this workflow when model files already exist and only the next-day forecast
+is needed.
+
+1. Start the dashboard.
+2. Open Data Management.
+3. Check raw and cleaned data status.
+4. If raw data changed, click Run Data Cleaning.
+5. If raw data did not change, skip cleaning.
+6. Open Planned Outage Planning.
+7. Edit the 24-hour unit availability table.
+8. Use 1 for available units and 0 for unavailable units.
+9. Click Save Outage Plan.
+10. Click Forecast Day-Ahead.
+11. Wait for RBFNN, Random Forest, and XGBoost forecast-only scripts to finish.
+12. Open Forecast.
+13. Select the model to inspect.
+14. Review charts, KPIs, and forecast table.
+15. Download the Excel forecast if needed.
+
+
+============================================================
+12. FIRST-RUN OR FULL-UPDATE WORKFLOW
+============================================================
+
+Use this workflow when preparing the system from scratch or after adding new
+source data.
+
+1. Place the raw workbook in:
+
+   data/DATA(JAN2024-JUNE2025).xlsx
+
+2. Start the dashboard.
+3. Open Data Management.
+4. Click Run Data Cleaning.
+5. Open Planned Outage Planning.
+6. Review or edit the outage plan.
+7. Click Save Outage Plan.
+8. Click Retrain RBFNN Model.
+9. Wait until training completes.
+10. Click Retrain Benchmark Models.
+11. Wait until benchmark training completes.
+12. Click Forecast Day-Ahead, or open Forecast and run forecasts by model.
+13. Review and download outputs.
+
+Training may take significantly longer than forecast-only operation.
+
+
+============================================================
+13. TROUBLESHOOTING
+============================================================
+
+Problem: Dashboard does not open.
+
+Actions:
+
+1. Confirm Python is installed.
+2. Confirm Streamlit is installed.
+3. Run:
+
+   python -m streamlit run scripts\streamlit_app.py
+
+Problem: Raw data status is missing.
+
+Actions:
+
+1. Confirm the workbook exists at:
+
+   data/DATA(JAN2024-JUNE2025).xlsx
+
+2. Use Upload Excel File or copy the file manually.
+3. Click Refresh Data From Disk.
+
+Problem: Cleaned data status is missing.
+
+Actions:
+
+1. Open Data Management.
+2. Click Run Data Cleaning.
+3. Wait for Cell 1 to complete.
+
+Problem: Forecast-only mode fails.
+
+Actions:
+
+1. Confirm cleaned data exists.
+2. Confirm the outage plan exists.
+3. Confirm saved model files exist in the models folder.
+4. If model files are missing, retrain the required model.
+
+Problem: Outage workbook will not save.
+
+Actions:
+
+1. Close the outage workbook in Excel.
+2. Return to the dashboard.
+3. Save the outage plan again.
+
+Problem: Forecast chart is not updated.
+
+Actions:
+
+1. Click Refresh Forecast Files.
+2. Check the Forecast Generated timestamp.
+3. Run the selected model forecast again if needed.
+
