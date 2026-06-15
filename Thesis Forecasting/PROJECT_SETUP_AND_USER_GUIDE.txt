@@ -1,4 +1,4 @@
-HYDROPOWER FORECASTING SYSTEM USER GUIDE
+﻿HYDROPOWER FORECASTING SYSTEM USER GUIDE
 
 This guide is for Windows users who will run the hydropower forecasting system using the graphical dashboard or VS Code.
 
@@ -41,9 +41,13 @@ The system can:
 
 The dashboard is the recommended way to use the system for daily forecasting.
 
-The dashboard uses the final RBFNN workflow only.
+The dashboard supports the final RBFNN workflow and the benchmark models:
 
-Benchmark models are still available in the scripts for thesis comparison, but they are not part of the main dashboard workflow.
+- RBFNN
+- Random Forest
+- XGBoost
+
+The Forecast page can generate and display day-ahead forecasts for all three models.
 
 
 Important folders and files:
@@ -69,7 +73,7 @@ benchmark
 thesis_figures
 - Stores graphs and figures for the thesis.
 
-streamlit_app.py
+scripts\streamlit_app.py
 - Main graphical dashboard file.
 
 RUN_DASHBOARD.bat
@@ -204,7 +208,7 @@ outputs
 metadata
 benchmark
 thesis_figures
-streamlit_app.py
+scripts\streamlit_app.py
 RUN_DASHBOARD.bat
 
 Important:
@@ -332,13 +336,13 @@ Thesis Forecasting
 3. Open the terminal.
 4. Type:
 
-streamlit run streamlit_app.py
+streamlit run scripts\streamlit_app.py
 
 5. Press Enter.
 
 If that command does not work, type:
 
-python -m streamlit run streamlit_app.py
+python -m streamlit run scripts\streamlit_app.py
 
 Important:
 
@@ -356,7 +360,7 @@ The dashboard has five pages:
 1. Dashboard Overview
 2. Data Management
 3. Planned Outage Planning
-4. RBFNN Forecasting
+4. Forecast
 5. System Information
 
 
@@ -428,25 +432,29 @@ Forecast Day-Ahead
 - Saves the outage plan and runs fast forecast-only mode.
 - It does not retrain.
 - It does not run data cleaning.
-- It does not run benchmark models.
-- It uses saved RBFNN models and the saved outage plan.
+- It uses saved RBFNN, Random Forest, and XGBoost model files with the saved outage plan.
+- It updates the operational 24-hour forecast files for all three models.
 
 Retrain RBFNN Model
 - Retrains the RBFNN model.
+- Use only when needed.
+
+Retrain Benchmark Models
+- Retrains the Random Forest and XGBoost benchmark models.
 - Use only when needed.
 
 Important:
 
 For normal daily use, click Forecast Day-Ahead.
 
-Do not click Retrain RBFNN Model unless new data was added, model files were deleted, or accuracy needs improvement.
+Do not click Retrain RBFNN Model or Retrain Benchmark Models unless new data was added, model files were deleted, or accuracy needs improvement.
 
 Do not run data cleaning again unless the raw Excel data changed.
 
 
-RBFNN FORECASTING
+FORECAST
 
-This page shows the forecast results.
+This page shows the forecast results for RBFNN, Random Forest, and XGBoost.
 
 It loads:
 
@@ -499,7 +507,7 @@ RUN_DASHBOARD.bat
 
 or:
 
-streamlit run streamlit_app.py
+streamlit run scripts\streamlit_app.py
 
 2. Go to:
 
@@ -536,11 +544,13 @@ Forecast Day-Ahead
 
 10. Go to:
 
-RBFNN Forecasting
+Forecast
 
-11. Review the forecast table and charts.
+11. Select RBFNN, Random Forest, or XGBoost.
 
-12. Download the Excel or CSV forecast if needed.
+12. Review the forecast table and charts.
+
+13. Download the Excel forecast if needed.
 
 
 Dashboard daily workflow summary:
@@ -552,7 +562,7 @@ Planned Outage Planning
 Edit outage values
 Save Outage Plan
 Forecast Day-Ahead using fast forecast-only mode
-RBFNN Forecasting
+Forecast
 View and download forecast
 
 
@@ -658,13 +668,18 @@ Forecast-only mode does not:
 
 retrain the RBFNN
 run data cleaning
-run benchmark models
 regenerate thesis figures
 recompute validation/testing metrics
 
-Optional benchmark scripts should be used only for thesis comparison, not for daily forecasting:
+To forecast benchmark models from the terminal using saved model files:
 
-python scripts/cell3_benchmark.py
+python scripts/cell3_benchmark.py --forecast-only
+
+To forecast only one benchmark model:
+
+python scripts/cell3_benchmark.py --forecast-only --model random_forest
+
+python scripts/cell3_benchmark.py --forecast-only --model xgboost
 
 
 ====================================================
@@ -772,7 +787,7 @@ outputs/outages_planning/
 
 Dashboard:
 
-streamlit_app.py
+scripts\streamlit_app.py
 
 Dashboard launcher:
 
@@ -873,7 +888,7 @@ python -m pip install streamlit
 
 Then run:
 
-python -m streamlit run streamlit_app.py
+python -m streamlit run scripts\streamlit_app.py
 
 
 Error:
@@ -905,7 +920,7 @@ Close the old terminal window.
 
 If it still happens, run:
 
-python -m streamlit run streamlit_app.py --server.port 8502
+python -m streamlit run scripts\streamlit_app.py --server.port 8502
 
 Then open:
 
@@ -1021,11 +1036,11 @@ Save Outage Plan
 
 Forecast Day-Ahead
 
-This runs fast forecast-only mode. It does not retrain the model.
+This runs fast forecast-only mode for RBFNN, Random Forest, and XGBoost. It does not retrain the models.
 
 8. Go to:
 
-RBFNN Forecasting
+Forecast
 
 9. View or download the forecast.
 
@@ -1094,4 +1109,9 @@ Most common terminal daily command:
 
 python scripts/cell2_rbfnn.py --forecast-only
 
+For benchmark forecasts:
+
+python scripts/cell3_benchmark.py --forecast-only
+
 If you follow the steps exactly, the system can be used even without programming experience.
+
