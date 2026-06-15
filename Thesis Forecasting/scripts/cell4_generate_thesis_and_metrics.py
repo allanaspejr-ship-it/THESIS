@@ -402,8 +402,8 @@ def read_day_ahead_forecast(path, model_name):
 def generate_day_ahead_forecast_figure():
     forecasts = [
         read_day_ahead_forecast(BASE_DIR / "outputs" / "rbfnn_forecast" / "Day_Ahead_24H_RBFNN_Forecast.xlsx", "RBFNN"),
-        read_day_ahead_forecast(BASE_DIR / "benchmark" / "random_forest" / "Day_Ahead_24H_RANDOM_FOREST.xlsx", "Random Forest"),
-        read_day_ahead_forecast(BASE_DIR / "benchmark" / "xgboost" / "Day_Ahead_24H_XGBOOST.xlsx", "XGBoost"),
+        read_day_ahead_forecast(BASE_DIR / "outputs" / "random_forest_forecast" / "Day_Ahead_24H_RANDOM_FOREST.xlsx", "Random Forest"),
+        read_day_ahead_forecast(BASE_DIR / "outputs" / "xgboost_forecast" / "Day_Ahead_24H_XGBOOST.xlsx", "XGBoost"),
     ]
     plt.figure(figsize=(11, 5))
     for df in forecasts:
@@ -443,10 +443,6 @@ def write_model_metadata():
         summary = metrics.copy()
         summary["model"] = model_name
         predictions = read_predictions(model_name)
-
-        if model_name == "RBFNN":
-            write_rbfnn_daily_metrics("validation")
-            write_rbfnn_daily_metrics("testing")
 
         save_excel(validation, spec["folder"] / "validation_average_metrics.xlsx")
         save_excel(testing, spec["folder"] / "testing_average_metrics.xlsx")
