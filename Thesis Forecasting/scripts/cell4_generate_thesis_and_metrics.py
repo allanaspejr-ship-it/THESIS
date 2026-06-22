@@ -29,6 +29,7 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 METADATA_DIR = BASE_DIR / "metadata"
 OVERALL_METRICS_DIR = METADATA_DIR / "overall_metrics"
 DAY_AHEAD_BACKTEST_DIR = METADATA_DIR / "day_ahead_backtest"
+TRAINING_HISTORY_DIR = METADATA_DIR / "training_validation_loss"
 THESIS_FIGURES_DIR = BASE_DIR / "thesis_figures"
 
 # Stores plant labels, model source files, and figure output folders.
@@ -80,6 +81,7 @@ MODEL_KEYS = {
 
 FIGURE_DIRS = {
     "cleaned_profiles": THESIS_FIGURES_DIR / "cleaned_profiles",
+    "training_validation_loss": THESIS_FIGURES_DIR / "training_validation_loss",
     "testing_actual_vs_forecast": THESIS_FIGURES_DIR / "testing_actual_vs_forecast",
     "error_analysis": THESIS_FIGURES_DIR / "error_analysis",
     "benchmark_comparison": THESIS_FIGURES_DIR / "benchmark_comparison",
@@ -301,6 +303,27 @@ def generate_cleaned_profile_figures():
         save_figure(FIGURE_DIRS["cleaned_profiles"] / f"figure_4_{idx:02d}_{plant}_cleaned_profile.png")
 
 
+# Generates RBFNN training and validation loss plots per plant.
+def generate_training_validation_loss_figures():
+    for offset, plant in enumerate(PLANTS, start=7):
+        path = require_file(TRAINING_HISTORY_DIR / f"{plant}_training_history.xlsx")
+        df = pd.read_excel(path)
+        required_columns = {"epoch", "loss", "val_loss"}
+        if not required_columns.issubset(df.columns):
+            missing = sorted(required_columns - set(df.columns))
+            raise ValueError(f"Missing training history columns in {path}: {missing}")
+
+        plt.figure(figsize=(10, 5))
+        plt.plot(df["epoch"], df["loss"], label="Training Loss", linewidth=1.2)
+        plt.plot(df["epoch"], df["val_loss"], label="Validation Loss", linewidth=1.2)
+        plt.title(f"Figure 4.{offset}: RBFNN Training and Validation Loss - {PLANT_LABELS[plant]}")
+        plt.xlabel("Epoch")
+        plt.ylabel("Loss")
+        plt.grid(True, alpha=0.25)
+        plt.legend()
+        save_figure(FIGURE_DIRS["training_validation_loss"] / f"figure_4_{offset:02d}_{plant}_training_validation_loss.png")
+
+
 # Generates actual-versus-RBFNN forecast plots for testing data.
 def generate_testing_actual_vs_forecast_figures():
     df = read_predictions("RBFNN")
@@ -424,6 +447,10 @@ def generate_day_ahead_forecast_figure():
 def write_rbfnn_daily_metrics(split):
     frames = []
     source_dir = METADATA_DIR / f"{split}_metrics"
+    if not source_dir.exists():
+        print(f"Skipped optional RBFNN {split} daily metrics export; source folder not found: {source_dir}")
+        return
+
     for plant in PLANTS:
         path = require_file(source_dir / f"{plant}_{split}_daily_metrics.xlsx")
         df = pd.read_excel(path)
@@ -563,10 +590,13 @@ def main():
     # --- Figure and metadata generation pipeline ---
     ensure_dirs()
     generate_cleaned_profile_figures()
+    generate_training_validation_loss_figures()
     generate_testing_actual_vs_forecast_figures()
     generate_error_analysis_figures()
     generate_benchmark_comparison_figures()
     generate_day_ahead_forecast_figure()
+    write_rbfnn_daily_metrics("validation")
+    write_rbfnn_daily_metrics("testing")
     write_model_metadata()
     write_overall_comparison()
     write_day_ahead_backtest_comparison()
