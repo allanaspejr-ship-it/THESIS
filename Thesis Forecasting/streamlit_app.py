@@ -16,7 +16,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 
-APP_DIR = Path(__file__).resolve().parents[1]
+APP_DIR = Path(__file__).resolve().parent
 
 DATA_DIR = APP_DIR / "data"
 OUTPUTS_DIR = APP_DIR / "outputs"

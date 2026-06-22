@@ -1,6 +1,6 @@
 @echo off
-cd /d "C:\Users\Allen Mae\Desktop\HYDRO_FORECASTING\Thesis Forecasting"
+cd /d "%~dp0"
 
-python -m streamlit run scripts\streamlit_app.py
+python -m streamlit run streamlit_app.py
 
 pause

@@ -1,1 +1,0 @@
-The prediction variability summary checks whether the RBFNN produced non-constant predictions. A positive predicted standard deviation, realistic min/max range, and many unique prediction values support true model behavior rather than a constant-output failure.

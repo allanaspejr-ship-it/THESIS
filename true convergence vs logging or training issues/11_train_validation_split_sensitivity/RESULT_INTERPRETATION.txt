@@ -1,1 +1,0 @@
-The validation-testing comparison provides available split-sensitivity evidence. Similar metric levels across validation and testing indicate that the model behavior was stable beyond the training set.

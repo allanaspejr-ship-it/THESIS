@@ -1,1 +1,0 @@
-The current training_validation_loss folder does not contain raw epoch-level Excel histories. Archived training-validation loss PNGs were copied here as available loss-curve evidence. The CSV in this folder uses validation/testing MAPE, MAE, RMSE, and R2 as performance-level evidence that the flat curves correspond to acceptable forecast quality.

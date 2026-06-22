@@ -1,1 +1,0 @@
-The available project artifacts contain the selected center count per plant, but not the full validation results for every candidate center count tried during hyperparameter search. The generated plot documents final selected RBFNN capacity. Full sensitivity evidence would require saving the metric result for each candidate center count during retraining.

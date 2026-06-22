@@ -1,1 +1,0 @@
-The saved H5 files contain final model weights and optimizer iteration counts, but no separate initial weight snapshots. Therefore, final weights can be inspected, but a true before-vs-after numerical comparison requires rerunning training with weight snapshots saved before fitting.

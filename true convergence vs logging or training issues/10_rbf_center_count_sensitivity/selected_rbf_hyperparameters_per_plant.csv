@@ -1,7 +1,0 @@
-Plant,Feature Count,Selected Centers,Learning Rate,Best Shrinkage,Bias Correction MW,Operational MAPE Threshold MW,Bin Calibration,Hourly Residual Correction,Profile Blend
-AGUS 1,158,80,0.001,1.15,-0.0057935118481964,1.0,Yes,No,No
-AGUS 2,169,120,0.0005,1.15,0.0027223983899062,1.8,No,No,No
-AGUS 4,169,180,0.0005,1.15,0.0018687355979807,1.581,No,No,No
-AGUS 5,168,180,0.001,1.15,-0.0131150978326779,1.0,Yes,Yes,No
-AGUS 6,171,80,0.0005,1.15,-0.0089438945330613,2.19,No,No,No
-AGUS 7,168,120,0.001,1.15,0.0074621471518643,1.0,No,Yes,No

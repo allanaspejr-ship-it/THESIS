@@ -1,1 +1,0 @@
-The baseline comparison files compare RBFNN against Random Forest and XGBoost. Competitive RBFNN metrics against these baselines support that the flat loss curves did not prevent useful forecasting performance.

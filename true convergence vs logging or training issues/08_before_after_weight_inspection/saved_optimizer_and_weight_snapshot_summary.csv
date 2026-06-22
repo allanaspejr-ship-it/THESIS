@@ -1,7 +1,0 @@
-plant,saved_optimizer_iteration,saved_learning_rate,final_weights_available,initial_weights_snapshot_available
-agus1,3692,0.0010000000474974513,True,False
-agus2,4828,0.0005000000237487257,True,False
-agus4,3124,0.0005000000237487257,True,False
-agus5,3124,0.0010000000474974513,True,False
-agus6,3124,0.0005000000237487257,True,False
-agus7,3124,0.0010000000474974513,True,False
