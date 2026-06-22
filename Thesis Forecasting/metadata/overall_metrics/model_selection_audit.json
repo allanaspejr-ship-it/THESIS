@@ -1,0 +1,706 @@
+{
+  "rbfnn": [
+    {
+      "plant": "agus5",
+      "model": "RBFNN",
+      "feature_count": 213,
+      "selected_hyperparameters": {
+        "centers": 80,
+        "learning_rate": 0.0005,
+        "gamma_init": 0.5,
+        "batch_size": 16,
+        "early_stopping_patience": 16,
+        "shrinkage": 0.1
+      },
+      "calibration": {
+        "bin_calibration": false,
+        "hourly_residual_correction": true,
+        "profile_blend": true,
+        "ramp_limit": 5.317387999999993
+      },
+      "validation_score_used_for_selection": {
+        "operational_mape": 8.094051632720722,
+        "rmse": 4.282633933272701,
+        "r2": 0.6013702049559182
+      },
+      "testing_score_after_final_evaluation": {
+        "operational_mape": 7.014536543223783,
+        "mae": 2.561916513469902,
+        "rmse": 4.017269162231092,
+        "r2": 0.6889966671759968
+      },
+      "selection_source": "saved optimized RBFNN metadata",
+      "testing_used_for_selection_or_calibration": false
+    },
+    {
+      "plant": "agus7",
+      "model": "RBFNN",
+      "feature_count": 213,
+      "selected_hyperparameters": {
+        "centers": 120,
+        "learning_rate": 0.0007,
+        "gamma_init": 0.5,
+        "batch_size": 16,
+        "early_stopping_patience": 16,
+        "shrinkage": 1.0
+      },
+      "calibration": {
+        "bin_calibration": true,
+        "hourly_residual_correction": true,
+        "profile_blend": false,
+        "ramp_limit": 5.10610399999998
+      },
+      "validation_score_used_for_selection": {
+        "operational_mape": 7.595132782483467,
+        "rmse": 3.524063157951415,
+        "r2": 0.4919095591238258
+      },
+      "testing_score_after_final_evaluation": {
+        "operational_mape": 7.100053092815831,
+        "mae": 2.470343544306012,
+        "rmse": 3.390199402978767,
+        "r2": 0.7881764442358834
+      },
+      "selection_source": "saved optimized RBFNN metadata",
+      "testing_used_for_selection_or_calibration": false
+    },
+    {
+      "plant": "agus1",
+      "model": "RBFNN",
+      "feature_count": 203,
+      "selected_hyperparameters": {
+        "centers": 180,
+        "learning_rate": 0.0003,
+        "gamma_init": 0.5,
+        "batch_size": 16,
+        "early_stopping_patience": 16,
+        "shrinkage": 1.0
+      },
+      "calibration": {
+        "bin_calibration": true,
+        "hourly_residual_correction": false,
+        "profile_blend": false,
+        "ramp_limit": 5.653995999999992
+      },
+      "validation_score_used_for_selection": {
+        "operational_mape": 5.976800931683473,
+        "rmse": 5.214419228200577,
+        "r2": 0.7171855165485657
+      },
+      "testing_score_after_final_evaluation": {
+        "operational_mape": 5.948577545752768,
+        "mae": 3.275663779475344,
+        "rmse": 8.048516433447602,
+        "r2": 0.4751213224448884
+      },
+      "selection_source": "saved optimized RBFNN metadata",
+      "testing_used_for_selection_or_calibration": false
+    },
+    {
+      "plant": "agus2",
+      "model": "RBFNN",
+      "feature_count": 234,
+      "selected_hyperparameters": {
+        "centers": 120,
+        "learning_rate": 0.0007,
+        "gamma_init": 0.5,
+        "batch_size": 16,
+        "early_stopping_patience": 16,
+        "shrinkage": 1.15
+      },
+      "calibration": {
+        "bin_calibration": true,
+        "hourly_residual_correction": true,
+        "profile_blend": false,
+        "ramp_limit": 8.683362000000004
+      },
+      "validation_score_used_for_selection": {
+        "operational_mape": 4.296521282119063,
+        "rmse": 8.89174078508493,
+        "r2": 0.2962098952575073
+      },
+      "testing_score_after_final_evaluation": {
+        "operational_mape": 5.506173843873867,
+        "mae": 4.620564072948108,
+        "rmse": 11.23351494396772,
+        "r2": 0.5163944689125419
+      },
+      "selection_source": "saved optimized RBFNN metadata",
+      "testing_used_for_selection_or_calibration": false
+    },
+    {
+      "plant": "agus4",
+      "model": "RBFNN",
+      "feature_count": 234,
+      "selected_hyperparameters": {
+        "centers": 180,
+        "learning_rate": 0.0003,
+        "gamma_init": 0.5,
+        "batch_size": 16,
+        "early_stopping_patience": 16,
+        "shrinkage": 1.15
+      },
+      "calibration": {
+        "bin_calibration": true,
+        "hourly_residual_correction": true,
+        "profile_blend": false,
+        "ramp_limit": 7.172374999999972
+      },
+      "validation_score_used_for_selection": {
+        "operational_mape": 3.541050075328585,
+        "rmse": 9.637258101665145,
+        "r2": 0.6073388172605674
+      },
+      "testing_score_after_final_evaluation": {
+        "operational_mape": 2.257958702419534,
+        "mae": 2.412928237062234,
+        "rmse": 7.953867317844638,
+        "r2": 0.6351935377429914
+      },
+      "selection_source": "saved optimized RBFNN metadata",
+      "testing_used_for_selection_or_calibration": false
+    },
+    {
+      "plant": "agus6",
+      "model": "RBFNN",
+      "feature_count": 276,
+      "selected_hyperparameters": {
+        "centers": 60,
+        "learning_rate": 0.0005,
+        "gamma_init": 0.5,
+        "batch_size": 16,
+        "early_stopping_patience": 16,
+        "shrinkage": 1.15
+      },
+      "calibration": {
+        "bin_calibration": true,
+        "hourly_residual_correction": true,
+        "profile_blend": false,
+        "ramp_limit": 15.317849999999991
+      },
+      "validation_score_used_for_selection": {
+        "operational_mape": 7.293640144385048,
+        "rmse": 18.97818242173732,
+        "r2": 0.07590767621605388
+      },
+      "testing_score_after_final_evaluation": {
+        "operational_mape": 6.941966326255017,
+        "mae": 5.470575399659038,
+        "rmse": 16.53993398154544,
+        "r2": 0.9188794748782994
+      },
+      "selection_source": "saved optimized RBFNN metadata",
+      "testing_used_for_selection_or_calibration": false
+    }
+  ],
+  "controls": {
+    "split_strategy": "chronological 70/15/15",
+    "primary_model": "RBFNN",
+    "benchmark_models": [
+      "Random Forest",
+      "XGBoost"
+    ],
+    "selection_rule": "lowest R2-aware validation score; score penalizes MAPE, RMSE, low R2, and especially negative R2",
+    "day_ahead_selection": "RBFNN finalists are selected with R2-aware rolling 24-hour validation backtests",
+    "testing_used_for_tuning": false,
+    "metric_source": "real model predictions only",
+    "benchmark_reporting": "Benchmarks are reported honestly even when they outperform RBFNN on a plant or metric.",
+    "comparison_metric_source": "metadata/overall_comparison/model_comparison_summary.xlsx"
+  },
+  "benchmarks": [
+    {
+      "model": "Random Forest",
+      "plant": "agus5",
+      "feature_count": 213,
+      "selected_hyperparameters": {
+        "n_estimators": 300,
+        "max_depth": 12,
+        "min_samples_leaf": 4,
+        "max_features": 0.55
+      },
+      "validation_score_used_for_selection": {
+        "operational_mape": 7.764594977199551,
+        "rmse": 4.132495355500004,
+        "r2": 0.6288302306412163
+      },
+      "testing_score_after_final_evaluation": {
+        "operational_mape": 6.892833286714121,
+        "mae": 2.605220520308225,
+        "rmse": 3.826593723783812,
+        "r2": 0.7178189203188657
+      },
+      "selection_source": "saved tuned benchmark model",
+      "testing_used_for_selection_or_calibration": false
+    },
+    {
+      "model": "XGBoost",
+      "plant": "agus5",
+      "feature_count": 213,
+      "selected_hyperparameters": {
+        "n_estimators": 260,
+        "max_depth": 3,
+        "learning_rate": 0.05,
+        "subsample": 0.95,
+        "colsample_bytree": 0.95,
+        "reg_lambda": 1.0
+      },
+      "validation_score_used_for_selection": {
+        "operational_mape": 7.958710498753789,
+        "rmse": 4.169641489174324,
+        "r2": 0.6221275063801326
+      },
+      "testing_score_after_final_evaluation": {
+        "operational_mape": 7.507447691170269,
+        "mae": 2.844720631610776,
+        "rmse": 4.102722877136087,
+        "r2": 0.6756248714952823
+      },
+      "selection_source": "saved tuned benchmark model",
+      "testing_used_for_selection_or_calibration": false
+    },
+    {
+      "model": "Random Forest",
+      "plant": "agus6",
+      "feature_count": 276,
+      "selected_hyperparameters": {
+        "n_estimators": 300,
+        "max_depth": 12,
+        "min_samples_leaf": 4,
+        "max_features": 0.55
+      },
+      "validation_score_used_for_selection": {
+        "operational_mape": 12.02832814403962,
+        "rmse": 25.83636102583379,
+        "r2": -0.7126507856141853
+      },
+      "testing_score_after_final_evaluation": {
+        "operational_mape": 9.219275075465431,
+        "mae": 9.256481021767867,
+        "rmse": 20.00492653963677,
+        "r2": 0.8813310412472414
+      },
+      "selection_source": "saved tuned benchmark model",
+      "testing_used_for_selection_or_calibration": false
+    },
+    {
+      "model": "XGBoost",
+      "plant": "agus6",
+      "feature_count": 276,
+      "selected_hyperparameters": {
+        "n_estimators": 720,
+        "max_depth": 4,
+        "learning_rate": 0.018,
+        "subsample": 0.85,
+        "colsample_bytree": 0.8,
+        "reg_lambda": 2.0
+      },
+      "validation_score_used_for_selection": {
+        "operational_mape": 9.510928553504108,
+        "rmse": 20.1150381651767,
+        "r2": -0.03812069982210264
+      },
+      "testing_score_after_final_evaluation": {
+        "operational_mape": 10.69672927363894,
+        "mae": 11.88384735005669,
+        "rmse": 20.83742308684718,
+        "r2": 0.8712488166101675
+      },
+      "selection_source": "saved tuned benchmark model",
+      "testing_used_for_selection_or_calibration": false
+    },
+    {
+      "model": "Random Forest",
+      "plant": "agus7",
+      "feature_count": 213,
+      "selected_hyperparameters": {
+        "n_estimators": 420,
+        "max_depth": null,
+        "min_samples_leaf": 3,
+        "max_features": 0.85
+      },
+      "validation_score_used_for_selection": {
+        "operational_mape": 8.217873924338527,
+        "rmse": 3.735023194023637,
+        "r2": 0.4292574332822398
+      },
+      "testing_score_after_final_evaluation": {
+        "operational_mape": 6.766642731293057,
+        "mae": 2.321893947886837,
+        "rmse": 3.288342264144233,
+        "r2": 0.8007135381880061
+      },
+      "selection_source": "saved tuned benchmark model",
+      "testing_used_for_selection_or_calibration": false
+    },
+    {
+      "model": "XGBoost",
+      "plant": "agus7",
+      "feature_count": 213,
+      "selected_hyperparameters": {
+        "n_estimators": 420,
+        "max_depth": 3,
+        "learning_rate": 0.035,
+        "subsample": 0.9,
+        "colsample_bytree": 0.9,
+        "reg_lambda": 1.0
+      },
+      "validation_score_used_for_selection": {
+        "operational_mape": 11.09234080219889,
+        "rmse": 5.104396715831522,
+        "r2": -0.06596390466723867
+      },
+      "testing_score_after_final_evaluation": {
+        "operational_mape": 7.412426636317172,
+        "mae": 2.407587144328811,
+        "rmse": 3.419399117832389,
+        "r2": 0.784511866945497
+      },
+      "selection_source": "saved tuned benchmark model",
+      "testing_used_for_selection_or_calibration": false
+    },
+    {
+      "model": "Random Forest",
+      "plant": "agus1",
+      "feature_count": 203,
+      "selected_hyperparameters": {
+        "n_estimators": 300,
+        "max_depth": 12,
+        "min_samples_leaf": 4,
+        "max_features": 0.55
+      },
+      "validation_score_used_for_selection": {
+        "operational_mape": 6.113179328825229,
+        "rmse": 5.413899137667787,
+        "r2": 0.6951332377232347
+      },
+      "testing_score_after_final_evaluation": {
+        "operational_mape": 5.955194023925231,
+        "mae": 3.259798352028101,
+        "rmse": 8.143975001938543,
+        "r2": 0.462596953471766
+      },
+      "selection_source": "saved tuned benchmark model",
+      "testing_used_for_selection_or_calibration": false
+    },
+    {
+      "model": "Random Forest",
+      "plant": "agus2",
+      "feature_count": 234,
+      "selected_hyperparameters": {
+        "n_estimators": 240,
+        "max_depth": 8,
+        "min_samples_leaf": 6,
+        "max_features": "sqrt"
+      },
+      "validation_score_used_for_selection": {
+        "operational_mape": 5.489371031445967,
+        "rmse": 8.802965437001962,
+        "r2": 0.3101930547025369
+      },
+      "testing_score_after_final_evaluation": {
+        "operational_mape": 8.204514227844818,
+        "mae": 7.776942778291191,
+        "rmse": 13.03656052844258,
+        "r2": 0.3486926557783088
+      },
+      "selection_source": "saved tuned benchmark model",
+      "testing_used_for_selection_or_calibration": false
+    },
+    {
+      "model": "Random Forest",
+      "plant": "agus4",
+      "feature_count": 234,
+      "selected_hyperparameters": {
+        "n_estimators": 240,
+        "max_depth": 8,
+        "min_samples_leaf": 6,
+        "max_features": "sqrt"
+      },
+      "validation_score_used_for_selection": {
+        "operational_mape": 4.467906739806385,
+        "rmse": 7.838824557029978,
+        "r2": 0.7402157132836075
+      },
+      "testing_score_after_final_evaluation": {
+        "operational_mape": 5.520566482949032,
+        "mae": 6.828135371531725,
+        "rmse": 9.591203470101432,
+        "r2": 0.4695407249149222
+      },
+      "selection_source": "saved tuned benchmark model",
+      "testing_used_for_selection_or_calibration": false
+    },
+    {
+      "model": "XGBoost",
+      "plant": "agus1",
+      "feature_count": 203,
+      "selected_hyperparameters": {
+        "n_estimators": 720,
+        "max_depth": 4,
+        "learning_rate": 0.018,
+        "subsample": 0.85,
+        "colsample_bytree": 0.8,
+        "reg_lambda": 2.0
+      },
+      "validation_score_used_for_selection": {
+        "operational_mape": 8.282719915825037,
+        "rmse": 5.959084231186836,
+        "r2": 0.6306408977931341
+      },
+      "testing_score_after_final_evaluation": {
+        "operational_mape": 7.026927863224362,
+        "mae": 3.754000650963771,
+        "rmse": 8.313288876327151,
+        "r2": 0.4400193708236613
+      },
+      "selection_source": "saved tuned benchmark model",
+      "testing_used_for_selection_or_calibration": false
+    },
+    {
+      "model": "XGBoost",
+      "plant": "agus2",
+      "feature_count": 234,
+      "selected_hyperparameters": {
+        "n_estimators": 720,
+        "max_depth": 4,
+        "learning_rate": 0.018,
+        "subsample": 0.85,
+        "colsample_bytree": 0.8,
+        "reg_lambda": 2.0
+      },
+      "validation_score_used_for_selection": {
+        "operational_mape": 8.728215601242882,
+        "rmse": 12.78323928452393,
+        "r2": -0.4546262017373699
+      },
+      "testing_score_after_final_evaluation": {
+        "operational_mape": 11.74639894622823,
+        "mae": 11.63750693500742,
+        "rmse": 16.52838972929516,
+        "r2": -0.04693812187887891
+      },
+      "selection_source": "saved tuned benchmark model",
+      "testing_used_for_selection_or_calibration": false
+    },
+    {
+      "model": "XGBoost",
+      "plant": "agus4",
+      "feature_count": 234,
+      "selected_hyperparameters": {
+        "n_estimators": 560,
+        "max_depth": 4,
+        "learning_rate": 0.025,
+        "subsample": 0.88,
+        "colsample_bytree": 0.85,
+        "reg_lambda": 1.5
+      },
+      "validation_score_used_for_selection": {
+        "operational_mape": 6.360355980179611,
+        "rmse": 12.22673170864062,
+        "r2": 0.3679786415393633
+      },
+      "testing_score_after_final_evaluation": {
+        "operational_mape": 5.623571752799493,
+        "mae": 6.917128874575435,
+        "rmse": 10.34045669071706,
+        "r2": 0.3834258984055897
+      },
+      "selection_source": "saved tuned benchmark model",
+      "testing_used_for_selection_or_calibration": false
+    }
+  ],
+  "rbfnn_vs_benchmarks": [
+    {
+      "plant": "agus1",
+      "benchmark": "Random Forest",
+      "rbfnn_test_mape": 5.948577545752768,
+      "benchmark_test_mape": 5.815498951255169,
+      "rbfnn_test_mae": 3.275663779475344,
+      "benchmark_test_mae": 3.178357148433609,
+      "rbfnn_test_rmse": 8.048516433447602,
+      "benchmark_test_rmse": 8.03495817340387,
+      "rbfnn_test_r2": 0.4751213224448884,
+      "benchmark_test_r2": 0.4768882188913155,
+      "rbfnn_won_mape": false,
+      "rbfnn_won_mae": false,
+      "rbfnn_won_rmse": false,
+      "rbfnn_won_r2": false
+    },
+    {
+      "plant": "agus1",
+      "benchmark": "XGBoost",
+      "rbfnn_test_mape": 5.948577545752768,
+      "benchmark_test_mape": 6.554836238848782,
+      "rbfnn_test_mae": 3.275663779475344,
+      "benchmark_test_mae": 3.511287228809579,
+      "rbfnn_test_rmse": 8.048516433447602,
+      "benchmark_test_rmse": 8.189139045230684,
+      "rbfnn_test_r2": 0.4751213224448884,
+      "benchmark_test_r2": 0.4566198734553241,
+      "rbfnn_won_mape": true,
+      "rbfnn_won_mae": true,
+      "rbfnn_won_rmse": true,
+      "rbfnn_won_r2": true
+    },
+    {
+      "plant": "agus2",
+      "benchmark": "Random Forest",
+      "rbfnn_test_mape": 5.506173843873867,
+      "benchmark_test_mape": 8.202621515052606,
+      "rbfnn_test_mae": 4.620564072948108,
+      "benchmark_test_mae": 7.774651223153412,
+      "rbfnn_test_rmse": 11.23351494396772,
+      "benchmark_test_rmse": 13.03510584383248,
+      "rbfnn_test_r2": 0.5163944689125419,
+      "benchmark_test_r2": 0.348837999929106,
+      "rbfnn_won_mape": true,
+      "rbfnn_won_mae": true,
+      "rbfnn_won_rmse": true,
+      "rbfnn_won_r2": true
+    },
+    {
+      "plant": "agus2",
+      "benchmark": "XGBoost",
+      "rbfnn_test_mape": 5.506173843873867,
+      "benchmark_test_mape": 5.365430256508413,
+      "rbfnn_test_mae": 4.620564072948108,
+      "benchmark_test_mae": 4.435603963414637,
+      "rbfnn_test_rmse": 11.23351494396772,
+      "benchmark_test_rmse": 11.56245184173678,
+      "rbfnn_test_r2": 0.5163944689125419,
+      "benchmark_test_r2": 0.4876581898627955,
+      "rbfnn_won_mape": false,
+      "rbfnn_won_mae": false,
+      "rbfnn_won_rmse": true,
+      "rbfnn_won_r2": true
+    },
+    {
+      "plant": "agus4",
+      "benchmark": "Random Forest",
+      "rbfnn_test_mape": 2.257958702419534,
+      "benchmark_test_mape": 5.520566482949032,
+      "rbfnn_test_mae": 2.412928237062234,
+      "benchmark_test_mae": 6.828135371531725,
+      "rbfnn_test_rmse": 7.953867317844638,
+      "benchmark_test_rmse": 9.591203470101432,
+      "rbfnn_test_r2": 0.6351935377429914,
+      "benchmark_test_r2": 0.4695407249149222,
+      "rbfnn_won_mape": true,
+      "rbfnn_won_mae": true,
+      "rbfnn_won_rmse": true,
+      "rbfnn_won_r2": true
+    },
+    {
+      "plant": "agus4",
+      "benchmark": "XGBoost",
+      "rbfnn_test_mape": 2.257958702419534,
+      "benchmark_test_mape": 5.03762304146431,
+      "rbfnn_test_mae": 2.412928237062234,
+      "benchmark_test_mae": 6.128557131679304,
+      "rbfnn_test_rmse": 7.953867317844638,
+      "benchmark_test_rmse": 9.305653959952801,
+      "rbfnn_test_r2": 0.6351935377429914,
+      "benchmark_test_r2": 0.5006562292614767,
+      "rbfnn_won_mape": true,
+      "rbfnn_won_mae": true,
+      "rbfnn_won_rmse": true,
+      "rbfnn_won_r2": true
+    },
+    {
+      "plant": "agus5",
+      "benchmark": "Random Forest",
+      "rbfnn_test_mape": 7.014536543223783,
+      "benchmark_test_mape": 6.892833286714121,
+      "rbfnn_test_mae": 2.561916513469902,
+      "benchmark_test_mae": 2.605220520308225,
+      "rbfnn_test_rmse": 4.017269162231092,
+      "benchmark_test_rmse": 3.826593723783812,
+      "rbfnn_test_r2": 0.6889966671759968,
+      "benchmark_test_r2": 0.7178189203188657,
+      "rbfnn_won_mape": false,
+      "rbfnn_won_mae": true,
+      "rbfnn_won_rmse": false,
+      "rbfnn_won_r2": false
+    },
+    {
+      "plant": "agus5",
+      "benchmark": "XGBoost",
+      "rbfnn_test_mape": 7.014536543223783,
+      "benchmark_test_mape": 7.507447691170269,
+      "rbfnn_test_mae": 2.561916513469902,
+      "benchmark_test_mae": 2.844720631610776,
+      "rbfnn_test_rmse": 4.017269162231092,
+      "benchmark_test_rmse": 4.102722877136087,
+      "rbfnn_test_r2": 0.6889966671759968,
+      "benchmark_test_r2": 0.6756248714952823,
+      "rbfnn_won_mape": true,
+      "rbfnn_won_mae": true,
+      "rbfnn_won_rmse": true,
+      "rbfnn_won_r2": true
+    },
+    {
+      "plant": "agus6",
+      "benchmark": "Random Forest",
+      "rbfnn_test_mape": 6.941966326255017,
+      "benchmark_test_mape": 8.226158995796979,
+      "rbfnn_test_mae": 5.470575399659038,
+      "benchmark_test_mae": 7.689717487901834,
+      "rbfnn_test_rmse": 16.53993398154544,
+      "benchmark_test_rmse": 20.04579984119748,
+      "rbfnn_test_r2": 0.9188794748782994,
+      "benchmark_test_r2": 0.8808456260975959,
+      "rbfnn_won_mape": true,
+      "rbfnn_won_mae": true,
+      "rbfnn_won_rmse": true,
+      "rbfnn_won_r2": true
+    },
+    {
+      "plant": "agus6",
+      "benchmark": "XGBoost",
+      "rbfnn_test_mape": 6.941966326255017,
+      "benchmark_test_mape": 8.226158995796979,
+      "rbfnn_test_mae": 5.470575399659038,
+      "benchmark_test_mae": 7.689717487901834,
+      "rbfnn_test_rmse": 16.53993398154544,
+      "benchmark_test_rmse": 20.04579984119748,
+      "rbfnn_test_r2": 0.9188794748782994,
+      "benchmark_test_r2": 0.8808456260975959,
+      "rbfnn_won_mape": true,
+      "rbfnn_won_mae": true,
+      "rbfnn_won_rmse": true,
+      "rbfnn_won_r2": true
+    },
+    {
+      "plant": "agus7",
+      "benchmark": "Random Forest",
+      "rbfnn_test_mape": 7.100053092815831,
+      "benchmark_test_mape": 6.778516069692492,
+      "rbfnn_test_mae": 2.470343544306012,
+      "benchmark_test_mae": 2.326595256288697,
+      "rbfnn_test_rmse": 3.390199402978767,
+      "benchmark_test_rmse": 3.291372438935524,
+      "rbfnn_test_r2": 0.7881764442358834,
+      "benchmark_test_r2": 0.8003460879679845,
+      "rbfnn_won_mape": false,
+      "rbfnn_won_mae": false,
+      "rbfnn_won_rmse": false,
+      "rbfnn_won_r2": false
+    },
+    {
+      "plant": "agus7",
+      "benchmark": "XGBoost",
+      "rbfnn_test_mape": 7.100053092815831,
+      "benchmark_test_mape": 7.862272269009213,
+      "rbfnn_test_mae": 2.470343544306012,
+      "benchmark_test_mae": 2.718965435018927,
+      "rbfnn_test_rmse": 3.390199402978767,
+      "benchmark_test_rmse": 3.843905664536912,
+      "rbfnn_test_r2": 0.7881764442358834,
+      "benchmark_test_r2": 0.7276864764818894,
+      "rbfnn_won_mape": true,
+      "rbfnn_won_mae": true,
+      "rbfnn_won_rmse": true,
+      "rbfnn_won_r2": true
+    }
+  ]
+}

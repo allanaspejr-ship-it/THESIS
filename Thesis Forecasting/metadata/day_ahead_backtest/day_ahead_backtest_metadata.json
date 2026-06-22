@@ -1,0 +1,26 @@
+{
+  "evaluation_type": "rolling_24h_day_ahead_backtest",
+  "models": [
+    "Persistence",
+    "RBFNN",
+    "Random Forest",
+    "Seasonal Naive 168h",
+    "Seasonal Naive 24h",
+    "XGBoost"
+  ],
+  "validation_forecast_days": 81,
+  "testing_forecast_days": 82,
+  "data_start": "2024-01-01 00:00:00",
+  "data_end": "2025-06-30 23:00:00",
+  "outage_input_type": "last_known_outage_status_before_forecast_day",
+  "outage_input_note": "Validation/testing day-ahead backtests persist only unit outage/status columns from the latest historical row before each forecast day. Same-day actual unit outage/status values are not used because archived planned outage schedules were unavailable.",
+  "unit_outage_status_rule": "For validation/testing, each 24-hour forecast day receives only the last-known out_agus*_unit* values from before 00:00 of that day.",
+  "same_day_actual_unit_outage_used": false,
+  "hydrologic_input_type": "lagged_or_persistence_context",
+  "hydrologic_input_note": "Forecast-day rainfall and Lake Lanao outflow were not taken from actual same-day records; lagged or most recent known values were used to avoid future leakage.",
+  "scaling_and_model_fitting_control": "RBFNN scalers and model weights are fitted on the training split only; saved training-fitted scalers are reused for validation/testing backtests.",
+  "validation_testing_separation": "Validation may be used for selection/calibration. Testing data are reserved for final evaluation only.",
+  "preprocessing_leakage_control": "Cell 1 KNN imputation is offline source-data preparation and is documented as a limitation; rolling backtest model scaling is training-fitted only.",
+  "thesis_ready_note": "Each validation and testing day was forecast as a complete 24-hour horizon using only data available before the forecast day. Lag and rolling features were reconstructed from historical values and recursive predictions, while actual forecast-day generation was used only after prediction for metrics.",
+  "benchmark_model_fitting_control": "Random Forest and XGBoost estimators are fitted on the training split only; saved models are reused for validation/testing backtests."
+}

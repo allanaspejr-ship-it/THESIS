@@ -1,0 +1,27 @@
+{
+  "split_strategy": "chronological 70/15/15",
+  "scaler_fitting": "training set only",
+  "model_training": "training set only",
+  "calibration_selection": "validation set only",
+  "testing_use": "final evaluation only",
+  "feature_leakage_check": "PASS",
+  "day_ahead_mode": "recursive 24-hour forecasting",
+  "future_data_used": false,
+  "recursive_forecast_note": "Each forecast hour is appended to the history before building features for the next forecast hour.",
+  "unit_outage_inputs": "validation/testing use only last-known unit outage/status before each forecast day; same-day actual unit outage/status is excluded",
+  "planned_outage_inputs": "only the operational 24-hour forecast mode may read a planned outage template known before the forecast day",
+  "per_plant_feature_audit_results": [
+    {
+      "plant": "agus1",
+      "feature_count": 203,
+      "leakage_check": "PASS",
+      "forbidden_feature_columns": []
+    },
+    {
+      "plant": "agus5",
+      "feature_count": 213,
+      "leakage_check": "PASS",
+      "forbidden_feature_columns": []
+    }
+  ]
+}
