@@ -1283,21 +1283,32 @@ def outage_status_frame(df: pd.DataFrame) -> pd.DataFrame:
     cols = outage_columns(df)
     if not cols:
         return pd.DataFrame()
-    status = df[["Date", "Hour", *cols]].copy()
+    base_cols = [col for col in ["Date", "Hour"] if col in df.columns]
+    status = df.loc[:, [*base_cols, *cols]].copy()
+    status = status.loc[:, ~status.columns.duplicated()].reset_index(drop=True)
     for col in cols:
-        status[col] = pd.to_numeric(status[col], errors="coerce").fillna(1).round().astype(int).map({1: "ON", 0: "OFF"})
+        if col in status.columns:
+            status[col] = pd.to_numeric(status[col], errors="coerce").fillna(1).clip(0, 1).round().astype(int)
     return status
 
 
-def style_outage_status(df: pd.DataFrame):
-    def style_cell(value: object) -> str:
-        if value == "ON":
-            return "color: #22c55e; font-weight: 800;"
-        if value == "OFF":
-            return "color: #ef4444; font-weight: 900;"
-        return ""
+def clean_outage_status_frame(df: pd.DataFrame) -> pd.DataFrame:
+    status = df.copy()
+    status = status.loc[:, ~status.columns.duplicated()].reset_index(drop=True)
 
-    return df.style.map(style_cell)
+    def safe_display_value(value: object) -> str:
+        if isinstance(value, (list, tuple, dict, set)):
+            return str(value)
+        return "" if pd.isna(value) else str(value)
+
+    for col in status.columns:
+        if str(col).startswith("out_agus"):
+            status[col] = pd.to_numeric(status[col], errors="coerce").fillna(1).clip(0, 1).round().astype(int)
+        elif pd.api.types.is_datetime64_any_dtype(status[col]):
+            status[col] = status[col].dt.strftime("%Y-%m-%d %H:%M").fillna("")
+        else:
+            status[col] = status[col].map(safe_display_value)
+    return status.fillna("")
 
 
 def display_forecast_table(forecast: pd.DataFrame) -> pd.DataFrame:
@@ -2079,6 +2090,7 @@ def planned_outage_page() -> None:
         hide_index=True,
         column_config=column_config,
         disabled=[col for col in editable.columns if col not in outage_cols],
+        key="planned_outage_editor",
     )
 
     button_cols = st.columns(4, gap="large")
@@ -2120,9 +2132,20 @@ def planned_outage_page() -> None:
 
     section_title("ON/OFF Status View")
     with st.container():
-        status_view = outage_status_frame(edited)
-        if not status_view.empty:
-            st.dataframe(style_outage_status(status_view), use_container_width=True, height=320)
+        try:
+            status_view = clean_outage_status_frame(outage_status_frame(edited))
+            if not status_view.empty:
+                st.dataframe(
+                    status_view,
+                    use_container_width=True,
+                    height=320,
+                    hide_index=True,
+                    key="planned_outage_status_view",
+                )
+            else:
+                st.warning("ON/OFF Status View is unavailable because no outage status columns were found.")
+        except Exception as exc:
+            st.warning(f"ON/OFF Status View could not be rendered: {exc}")
         if summary["affected_units"]:
             note_card(f'Affected Units: {", ".join(summary["affected_units"])}')
 
