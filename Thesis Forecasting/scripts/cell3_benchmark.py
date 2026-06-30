@@ -10,6 +10,7 @@ import math
 import re
 import sys
 import warnings
+import zipfile
 from pathlib import Path
 
 import joblib
@@ -1045,7 +1046,8 @@ def validate_and_fix_unit_forecast(forecast, planned):
                     forecast.loc[idx, col] = 0.0
                 forecast.loc[idx, col] = float(np.clip(forecast.loc[idx, col], 0.0, capacity))
             active = [col for col in unit_cols if forecast.loc[idx, col] > 1e-6]
-            if len(active) > 1 and np.allclose(forecast.loc[idx, active].values, forecast.loc[idx, active].iloc[0], atol=1e-6):
+            active_values = pd.to_numeric(forecast.loc[idx, active], errors="coerce").to_numpy(dtype=float) if active else np.array([])
+            if len(active_values) > 1 and np.allclose(active_values, active_values[0], atol=1e-6):
                 warnings.warn(
                     f"{plant} forecast row {idx + 1} has identical active unit generation; "
                     "check whether historical unit data contains identical unit behavior.",
@@ -1117,9 +1119,20 @@ def format_forecast_output(forecast):
 # Loads and standardizes the 24-hour planned outage input workbook.
 def load_planned():
     planned_path = OUTAGES_DIR / "Planned_Outages_Input.xlsx"
-    planned = pd.read_excel(planned_path)
+    try:
+        planned = pd.read_excel(planned_path)
+    except zipfile.BadZipFile as exc:
+        raise RuntimeError(
+            f"Cannot read planned outage workbook: {planned_path}\n"
+            "The file is damaged or was not saved as a valid .xlsx workbook. "
+            "Close it in Excel, then rerun Cell 1 to regenerate "
+            "outputs/outages_planning/Planned_Outages_Input.xlsx before rerunning this cell."
+        ) from exc
     planned.columns = [str(c).strip() for c in planned.columns]
     col_map = {c.lower(): c for c in planned.columns}
+    missing = [col for col in ["date", "hour"] if col not in col_map]
+    if missing:
+        raise ValueError(f"Planned outage workbook is missing required column(s): {', '.join(missing)}")
     planned = planned.rename(columns={col_map["date"]: "Date", col_map["hour"]: "Hour"})
     planned["Date"] = pd.to_datetime(planned["Date"])
     planned["Hour"] = planned["Hour"].apply(parse_planned_hour).astype(int)

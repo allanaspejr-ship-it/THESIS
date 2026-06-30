@@ -1,0 +1,94 @@
+PROMPT FOR VS CODE / CODEX CHAT
+================================
+
+You are editing my LaTeX thesis manuscript titled:
+"AI-Based Short-Term Generation Forecasting of Cascaded Hydroelectric Power Plants."
+
+Task:
+Revise the manuscript to answer the newest panel comments. Make the revisions directly in the LaTeX source files, using the existing writing style, formatting, equation style, section numbering, and cautious academic tone. Do not change unrelated sections. Do not rewrite the whole thesis. Keep the edits concise, direct, and thesis-ready.
+
+Panel comments to address:
+1. The day-ahead and data-leakage explanation is improved but spread across several sections. Add one short and direct summary in the methodology showing the forecast cut-off time, allowed data, excluded data, and how the 24-hour recursive forecast is generated.
+2. The model performance depends not only on the RBFNN but also on calibration and post-processing steps. Make clear that the reported results are for the complete forecasting pipeline, not the raw RBFNN alone, and briefly explain why these correction steps were necessary.
+3. Outage handling is acceptable for prototype testing, but the limitation should be stated more clearly. Since archived planned outage schedules were not available for the historical backtest, explain that using last-known unit status may not fully represent actual day-ahead outage planning or forced outage behavior.
+4. Hydrologic inputs should be interpreted carefully because rainfall and Lake Lanao outflow are daily-derived hourly-equivalent values. Avoid implying that the model captures real hourly rainfall, sudden inflow changes, or detailed within-day hydraulic behavior.
+5. Results are acceptable as prototype-level evidence, but some plant-level metrics remain moderate. Keep the discussion cautious by stating that the model is useful for offline decision-support evaluation, but still requires live-data testing, operator review, and longer validation before operational use.
+
+Files to inspect and edit:
+- ASPE_IIT_THESIS_MANUSCRIPT.tex
+- chapter3.tex or the methodology file if the thesis uses chapter files
+- chapter4.tex or the results/discussion file if the thesis uses chapter files
+- chapter5.tex or the conclusion/recommendations file if the thesis uses chapter files
+
+Required manuscript edits:
+
+A. Add a short subsection or paragraph in Chapter 3 Methodology, preferably at the start of Section 3.9 Forecasting Procedure or immediately before Table 3.3.
+
+Suggested heading:
+\subsection*{Day-Ahead Forecasting Cut-Off and Leakage-Control Summary}
+
+If unnumbered subsection headings are not used in the manuscript, use a normal paragraph beginning with:
+"To summarize the day-ahead forecasting protocol, ..."
+
+Insert a concise paragraph like this, adjusted only for grammar and existing style:
+
+To summarize the day-ahead forecasting protocol, the forecast origin was fixed at 23:00 of the day preceding the target forecast day. For a target day D+1, the model was allowed to use only records available up to the end of day D, including historical generation, lagged and rolling features, latest known pre-forecast unit status, and lagged or most-recent-known hydrologic context variables. Actual generation, actual rainfall, actual Lake Lanao outflow, actual hydrologic measurements, and actual outage status from the forecast day were excluded from the forecasting inputs and were accessed only after prediction for metric computation. The 24-hour forecast was generated recursively: after each hourly plant-generation forecast was produced, the predicted value was appended to a temporary history and used to rebuild lagged, rolling, unit-share, and upstream cascade features for the next forecast hour until all 24 target hours were completed.
+
+B. Add a clear "complete forecasting pipeline" clarification in Chapter 3, preferably after Sections 3.6.1-3.6.3 or before Section 3.9.
+
+Insert a paragraph like this:
+
+The reported RBFNN performance in this study therefore refers to the complete forecasting pipeline, not to the raw RBFNN output alone. The raw RBFNN produced next-hour residual or delta-generation estimates, while the final reported forecasts also included validation-only shrinkage, median-residual bias correction, optional bin calibration, optional hourly residual correction, profile blending where selected, ramp limiting, capacity clipping, and outage-aware adjustment. These steps were necessary because recursive 24-hour forecasting can accumulate drift, amplify bias, and produce outputs that may violate plant-capacity or planned-unit-availability constraints. All calibration and correction settings were selected using validation data only, while the testing set was reserved for final evaluation.
+
+C. Strengthen outage limitation wording in Chapter 3 Section 3.9, Chapter 4 Discussion, and/or Chapter 5 Scope/Recommendations.
+
+Add or revise a paragraph like this:
+
+For historical validation and testing, archived planned-outage schedules corresponding to each backtest day were not available. The study therefore used the latest known unit-status information before the forecast day as a proxy for the 24-hour outage condition during the historical backtest. This approach avoided the use of actual same-day outage status and therefore reduced leakage risk, but it should be interpreted as a prototype-level assumption. It may not fully represent actual day-ahead outage planning, forced outage events, unit derating, or operator-initiated outage changes that would have been known or decided only within the operating day.
+
+D. Strengthen hydrologic-input limitation in Chapter 3 Section 3.2.2 or Section 3.4, and repeat briefly in Chapter 4 Discussion or Chapter 5 Limitations.
+
+Add or revise wording like this:
+
+Rainfall and Lake Lanao outflow were treated only as daily-derived hourly-equivalent hydrologic context variables. They were retained to provide broad water-availability context, but they should not be interpreted as direct hourly rainfall observations, real-time inflow measurements, or detailed within-day hydraulic-response indicators. Consequently, the model does not claim to capture sudden hourly rainfall events, abrupt inflow changes, routing delays, or detailed within-day hydrodynamic behavior of the Agus--Lake Lanao system.
+
+E. Add a cautious results interpretation paragraph in Chapter 4 Discussion, preferably in Section 4.8.2, 4.8.4, or 4.8.5.
+
+Insert or revise wording like this:
+
+Although the aggregate testing results support the usefulness of the forecasting framework, the plant-level metrics remained moderate for some Agus plants. These variations indicate that the model was better at representing recurring historical generation patterns than unexpected operational changes. Therefore, the results should be interpreted as offline prototype-level evidence for decision-support evaluation, not as proof of operational readiness. Before practical adoption, the framework should be tested with live data streams, operator-reviewed day-ahead inputs, actual planned-outage schedules, longer validation periods, and continuous performance monitoring.
+
+F. Add or strengthen the same cautious language in Chapter 5 Conclusion and Recommendations.
+
+In the conclusion, ensure there is a sentence like:
+
+The framework is useful for offline decision-support evaluation and capacity-nomination review, but it should not be considered operationally ready until validated using live plant data, operator-reviewed inputs, actual planned-outage schedules, and longer real-time testing.
+
+In the recommendations, ensure there is a recommendation like:
+
+Future work should validate the forecasting framework under live plant operation using real-time data acquisition, operator-reviewed outage and hydrologic inputs, and a longer monitoring period to determine whether the model can maintain reliable performance beyond historical offline backtesting.
+
+G. Update the Summary of Revisions / P2P response table, if it exists in the project.
+
+Add an action-taken response for the new panel comment. Use this wording:
+
+The methodology was revised to add a short day-ahead forecasting and leakage-control summary identifying the 23:00 pre-forecast cut-off time, the allowed historical and latest-known inputs, the excluded forecast-day actual generation, rainfall, Lake Lanao outflow, hydrologic measurements, and actual outage status, and the recursive 24-hour procedure used to generate the forecast. The manuscript was also revised to clarify that the reported RBFNN results refer to the complete forecasting pipeline, including validation-only calibration and post-processing steps, rather than the raw RBFNN output alone. Additional limitations were added regarding the use of last-known unit status when archived planned-outage schedules were unavailable, the interpretation of rainfall and Lake Lanao outflow as daily-derived hourly-equivalent hydrologic context variables, and the need for live-data testing, operator review, actual planned-outage inputs, and longer validation before operational use.
+
+Suggested page/section reference format, but update page numbers after recompiling:
+See Sections 3.2.2, 3.6.1--3.6.3, 3.9, 3.9.1, 4.8.2--4.8.5, and 5.1--5.2.
+
+H. Important consistency rules:
+- Keep the tone cautious. Use "prototype," "offline evaluation," "decision-support," "potential," and "requires further validation."
+- Do not say the system is fully deployable, operationally ready, or validated in real plant operation.
+- Do not imply that rainfall and Lake Lanao outflow are true hourly measurements.
+- Do not imply that forced outages were known before the forecast day.
+- Do not use testing data for tuning in any wording.
+- Keep the edits concise so the manuscript does not become repetitive.
+- Preserve all citations already present. Add no new citation unless already available in the .bib and clearly relevant.
+- After editing, compile the manuscript and check that section numbering, table numbering, equation numbering, and references still work.
+
+Output required:
+1. Briefly list every file changed.
+2. List the exact sections edited.
+3. Provide the final inserted/revised paragraphs.
+4. Report whether the LaTeX compilation succeeded or failed.

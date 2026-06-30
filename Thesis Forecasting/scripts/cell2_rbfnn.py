@@ -11,18 +11,21 @@ Key improvements:
 """
 
 import json
+import io
 import math
 import os
 import re
 import shutil
 import sys
 import warnings
+import zipfile
 from pathlib import Path
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 
 import joblib
+import h5py
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -33,8 +36,12 @@ from sklearn.preprocessing import StandardScaler
 
 warnings.filterwarnings("ignore")
 np.random.seed(42)
-tf.get_logger().setLevel("ERROR")
-tf.random.set_seed(42)
+if hasattr(tf, "get_logger"):
+    tf.get_logger().setLevel("ERROR")
+elif hasattr(tf, "compat") and hasattr(tf.compat, "v1"):
+    tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
+if hasattr(tf, "random") and hasattr(tf.random, "set_seed"):
+    tf.random.set_seed(42)
 
 # ============================================================
 # PATH AND MODEL CONFIGURATION
@@ -414,6 +421,57 @@ def init_centers(model, x_train, n_centers=N_CENTERS):
         if isinstance(layer, RBFLayer):
             layer.centers.assign(centers)
             return
+
+
+def _keras_archive_model_config(model_path):
+    with zipfile.ZipFile(model_path) as archive:
+        return json.loads(archive.read("config.json"))
+
+
+def _find_serialized_layer(config, class_name):
+    stack = [config]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, dict):
+            if item.get("class_name") == class_name:
+                return item
+            stack.extend(item.values())
+        elif isinstance(item, list):
+            stack.extend(item)
+    return None
+
+
+def load_rbfnn_model(model_path):
+    try:
+        return tf.keras.models.load_model(model_path, custom_objects={"RBFLayer": RBFLayer}, compile=False)
+    except TypeError as exc:
+        if "keras.src.models.functional" not in str(exc) and "InputLayer" not in str(exc):
+            raise
+
+    config = _keras_archive_model_config(model_path)
+    input_layer = _find_serialized_layer(config, "InputLayer")
+    rbf_layer = _find_serialized_layer(config, "RBFLayer")
+    if input_layer is None or rbf_layer is None:
+        raise RuntimeError(f"Cannot reconstruct incompatible Keras archive: {model_path}")
+
+    input_shape = input_layer["config"].get("batch_shape") or input_layer["config"].get("batch_input_shape")
+    input_dim = int(input_shape[-1])
+    rbf_config = rbf_layer["config"]
+    model = build_model(input_dim, n_centers=int(rbf_config["units"]), gamma_init=float(rbf_config.get("gamma_init", 1.0)))
+
+    with zipfile.ZipFile(model_path) as archive:
+        weights_bytes = archive.read("model.weights.h5")
+    with h5py.File(io.BytesIO(weights_bytes), "r") as weights_file:
+        rbf_vars = weights_file["layers"]["rbf_layer"]["vars"]
+        dense_vars = weights_file["layers"]["dense"]["vars"]
+        for layer in model.layers:
+            if isinstance(layer, RBFLayer):
+                layer.centers.assign(rbf_vars["0"][()])
+                layer.log_gamma.assign(rbf_vars["1"][()])
+            elif isinstance(layer, tf.keras.layers.Dense):
+                layer.kernel.assign(dense_vars["0"][()])
+                layer.bias.assign(dense_vars["1"][()])
+    return model
 
 
 # ============================================================
@@ -1001,7 +1059,8 @@ def validate_and_fix_unit_forecast(forecast, planned):
                 forecast.loc[idx, col] = float(np.clip(forecast.loc[idx, col], 0.0, capacity))
 
             active = [col for col in unit_cols if forecast.loc[idx, col] > 1e-6]
-            if len(active) > 1 and np.allclose(forecast.loc[idx, active].values, forecast.loc[idx, active].iloc[0], atol=1e-6):
+            active_values = pd.to_numeric(forecast.loc[idx, active], errors="coerce").to_numpy(dtype=float) if active else np.array([])
+            if len(active_values) > 1 and np.allclose(active_values, active_values[0], atol=1e-6):
                 warnings.warn(
                     f"{plant} forecast row {idx + 1} has identical active unit generation; "
                     "check whether historical unit data contains identical unit behavior.",
@@ -1141,9 +1200,20 @@ def ramp_limit(train_series):
 
 # Loads and standardizes the 24-hour planned outage input workbook.
 def load_planned():
-    planned = pd.read_excel(PLANNED_PATH)
+    try:
+        planned = pd.read_excel(PLANNED_PATH)
+    except zipfile.BadZipFile as exc:
+        raise RuntimeError(
+            f"Cannot read planned outage workbook: {PLANNED_PATH}\n"
+            "The file is damaged or was not saved as a valid .xlsx workbook. "
+            "Close it in Excel, then rerun Cell 1 to regenerate "
+            "outputs/outages_planning/Planned_Outages_Input.xlsx before rerunning this cell."
+        ) from exc
     planned.columns = [str(c).strip() for c in planned.columns]
     col_map = {c.lower(): c for c in planned.columns}
+    missing = [col for col in ["date", "hour"] if col not in col_map]
+    if missing:
+        raise ValueError(f"Planned outage workbook is missing required column(s): {', '.join(missing)}")
     planned = planned.rename(columns={col_map["date"]: "Date", col_map["hour"]: "Hour"})
     planned["Date"] = pd.to_datetime(planned["Date"])
     planned["Hour"] = planned["Hour"].apply(parse_planned_hour).astype(int)
@@ -1297,7 +1367,7 @@ def forecast_24h(raw_df, planned):
         meta = json.loads(model_file(f"meta_{plant}.json").read_text())
         loaded[plant] = {
             "meta": meta,
-            "model": tf.keras.models.load_model(model_file(f"rbfnn_{plant}.keras"), custom_objects={"RBFLayer": RBFLayer}, compile=False),
+            "model": load_rbfnn_model(model_file(f"rbfnn_{plant}.keras")),
             "x_scaler": joblib.load(model_file(f"x_scaler_{plant}.pkl")),
             "y_scaler": joblib.load(model_file(f"y_scaler_{plant}.pkl")),
         }
@@ -1433,11 +1503,7 @@ def load_rbfnn_backtest_bundle():
     for plant in PLANTS:
         bundle[plant] = {
             "meta": json.loads((MODEL_DIR / f"meta_{plant}.json").read_text()),
-            "model": tf.keras.models.load_model(
-                preferred_rbfnn_model_path(plant),
-                custom_objects={"RBFLayer": RBFLayer},
-                compile=False,
-            ),
+            "model": load_rbfnn_model(preferred_rbfnn_model_path(plant)),
             "x_scaler": joblib.load(model_file(f"x_scaler_{plant}.pkl")),
             "y_scaler": joblib.load(model_file(f"y_scaler_{plant}.pkl")),
         }
@@ -2081,7 +2147,7 @@ def evaluate_saved_models(raw_df):
         data = feat_df.dropna(subset=[y_col] + x_cols).copy()
         _, val_df, test_df = chronological_split(data)
 
-        model = tf.keras.models.load_model(model_file(f"rbfnn_{plant}.keras"), custom_objects={"RBFLayer": RBFLayer}, compile=False)
+        model = load_rbfnn_model(model_file(f"rbfnn_{plant}.keras"))
         x_scaler = joblib.load(model_file(f"x_scaler_{plant}.pkl"))
         y_scaler = joblib.load(model_file(f"y_scaler_{plant}.pkl"))
 

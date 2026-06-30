@@ -707,6 +707,10 @@ def clear_cached_data(message: str | None = None) -> None:
         st.success(message)
 
 
+def reset_planned_outage_editor() -> None:
+    st.session_state["planned_outage_editor_revision"] = st.session_state.get("planned_outage_editor_revision", 0) + 1
+
+
 @st.cache_data(show_spinner=False)
 def load_raw_excel(modified: int) -> pd.DataFrame:
     _ = modified
@@ -933,6 +937,7 @@ def save_outage_plan(df: pd.DataFrame) -> None:
         saved[col] = pd.to_numeric(saved[col], errors="coerce").fillna(1).clip(0, 1).round().astype(int)
     saved.to_excel(OUTAGE_PLAN_PATH, index=False)
     st.cache_data.clear()
+    reset_planned_outage_editor()
 
 
 def validate_fast_forecast_ready() -> None:
@@ -2090,7 +2095,7 @@ def planned_outage_page() -> None:
         hide_index=True,
         column_config=column_config,
         disabled=[col for col in editable.columns if col not in outage_cols],
-        key="planned_outage_editor",
+        key=f"planned_outage_editor_{st.session_state.get('planned_outage_editor_revision', 0)}",
     )
 
     button_cols = st.columns(4, gap="large")
@@ -2129,25 +2134,6 @@ def planned_outage_page() -> None:
                     show_script_result(run_script(BENCHMARK_SCRIPT, ["--train"]), "Benchmark model retraining")
                 except Exception as exc:
                     st.error(str(exc))
-
-    section_title("ON/OFF Status View")
-    with st.container():
-        try:
-            status_view = clean_outage_status_frame(outage_status_frame(edited))
-            if not status_view.empty:
-                st.dataframe(
-                    status_view,
-                    use_container_width=True,
-                    height=320,
-                    hide_index=True,
-                    key="planned_outage_status_view",
-                )
-            else:
-                st.warning("ON/OFF Status View is unavailable because no outage status columns were found.")
-        except Exception as exc:
-            st.warning(f"ON/OFF Status View could not be rendered: {exc}")
-        if summary["affected_units"]:
-            note_card(f'Affected Units: {", ".join(summary["affected_units"])}')
 
 
 def forecast_file_status_cards() -> None:
