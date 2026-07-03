@@ -938,6 +938,10 @@ def available_capacity(plant, status):
     )
 
 
+def all_units_available_status(plant):
+    return {unit_status_col(plant, unit): 1.0 for unit in UNIT_CAPACITY[plant]}
+
+
 # Computes historical unit generation shares within a plant total.
 def _unit_share_frame(plant, hist):
     unit_cols = unit_generation_columns(plant)
@@ -1041,9 +1045,17 @@ def allocate_with_unit_caps(plant, total_generation, weights, status):
 
 
 # Distributes one plant forecast into unit-level generation values.
-def distribute_to_units(plant, plant_forecast, status, hist, forecast_hour):
-    weights = learned_unit_weights(plant, hist, status, forecast_hour)
-    return allocate_with_unit_caps(plant, plant_forecast, weights, status)
+def distribute_to_units(plant, plant_forecast, status, hist, forecast_hour, return_base=False):
+    base_status = all_units_available_status(plant)
+    weights = learned_unit_weights(plant, hist, base_status, forecast_hour)
+    base_values = allocate_with_unit_caps(plant, plant_forecast, weights, base_status)
+    unit_values = dict(base_values)
+    for unit in UNIT_CAPACITY[plant]:
+        if status.get(unit_status_col(plant, unit), 1.0) <= 0:
+            unit_values[f"gen_{plant}_{unit}"] = 0.0
+    if return_base:
+        return unit_values, base_values
+    return unit_values
 
 
 # Enforces outages, unit caps, and plant-total consistency in the forecast table.
@@ -1397,14 +1409,13 @@ def forecast_24h(raw_df, planned):
             base_pred = float(np.clip(base_pred, 0.0, CAPACITY_MW[plant] * 1.05))
 
             p_status = planned_status(planned, step, plant)
-            max_available = available_capacity(plant, p_status)
-            adjusted = float(np.clip(base_pred, 0.0, max_available)) if max_available > 0 else 0.0
-            unit_values = distribute_to_units(plant, adjusted, p_status, hist, hour_i)
+            unit_values, recursive_unit_values = distribute_to_units(plant, base_pred, p_status, hist, hour_i, return_base=True)
             for unit_col, value in unit_values.items():
                 forecast.loc[step, unit_col] = value
+            for unit_col, value in recursive_unit_values.items():
                 new_row[unit_col] = value
             forecast.loc[step, f"total_gen_{plant}"] = sum(unit_values.values())
-            new_row[target] = forecast.loc[step, f"total_gen_{plant}"]
+            new_row[target] = sum(recursive_unit_values.values())
 
         hist = pd.concat([hist, pd.DataFrame([new_row])], ignore_index=True)
         forecast.loc[step, CASCADE_FORECAST_COLUMN] = forecast.loc[step, TOTAL_FORECAST_COLUMNS].sum()
@@ -1557,9 +1568,7 @@ def forecast_24h_from_loaded_bundle(history, planned, bundle):
             base_pred = float(np.clip(base_pred, 0.0, CAPACITY_MW[plant] * 1.05))
 
             p_status = planned_status(planned, step, plant)
-            max_available = available_capacity(plant, p_status)
-            adjusted = float(np.clip(base_pred, 0.0, max_available)) if max_available > 0 else 0.0
-            unit_values = distribute_to_units(plant, adjusted, p_status, hist, hour_i)
+            unit_values = distribute_to_units(plant, base_pred, p_status, hist, hour_i)
             for unit_col, value in unit_values.items():
                 forecast.loc[step, unit_col] = value
                 new_row[unit_col] = value
@@ -1609,9 +1618,7 @@ def rolling_plant_day_ahead_predictions(raw_df, forecast_days, plant, model_info
             base_pred = float(np.clip(base_pred, 0.0, CAPACITY_MW[plant] * 1.05))
 
             p_status = planned_status(planned, step, plant)
-            max_available = available_capacity(plant, p_status)
-            adjusted = float(np.clip(base_pred, 0.0, max_available)) if max_available > 0 else 0.0
-            unit_values = distribute_to_units(plant, adjusted, p_status, hist, hour_i)
+            unit_values = distribute_to_units(plant, base_pred, p_status, hist, hour_i)
             for unit_col, value in unit_values.items():
                 new_row[unit_col] = value
             predicted = float(sum(unit_values.values()))
