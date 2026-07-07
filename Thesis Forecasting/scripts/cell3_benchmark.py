@@ -178,6 +178,7 @@ PROFILE_BLEND_GRID = [0.0, 0.10, 0.20, 0.30, 0.40, 0.55, 0.70, 0.85]
 HOURLY_CORRECTION_SCALE_GRID = [0.0, 0.25, 0.50, 0.75, 1.00, 1.25]
 ANCHOR_BLEND_GRID = [0.0, 0.25, 0.50, 0.75, 1.00]
 ANCHOR_CURRENT_WEIGHT_GRID = [0.0, 0.25, 0.50, 0.75, 1.00]
+MAX_RECURSIVE_ANCHOR_WEIGHT = 0.85
 
 
 def calibrated_level_prediction(current, delta_pred, plant, calibration=None):
@@ -336,6 +337,7 @@ def apply_benchmark_calibration(pred, basis_current, plant, calibration, hours=N
 def apply_level_anchor_blend(pred, current, lag_anchor, plant, config):
     if not config:
         return np.asarray(pred, dtype=float)
+    config = capped_recursive_anchor_config(config)
     weight = float(config.get("weight", 0.0))
     current_weight = float(config.get("current_weight", 0.0))
     current = np.nan_to_num(np.asarray(current, dtype=float), nan=0.0)
@@ -343,6 +345,14 @@ def apply_level_anchor_blend(pred, current, lag_anchor, plant, config):
     anchor = current_weight * current + (1.0 - current_weight) * lag_anchor
     out = (1.0 - weight) * np.asarray(pred, dtype=float) + weight * anchor
     return np.clip(out, 0.0, CAPACITY_MW[plant] * 1.05)
+
+
+def capped_recursive_anchor_config(config):
+    if not config:
+        return None
+    out = dict(config)
+    out["weight"] = min(float(out.get("weight", 0.0)), MAX_RECURSIVE_ANCHOR_WEIGHT)
+    return out
 
 
 def tune_level_anchor_blend(plant, pred, actual, current, lag_anchor):
@@ -365,7 +375,8 @@ def benchmark_level_prediction(current, delta_pred, plant, calibration=None, hou
         out = apply_hourly_correction(out, hours, plant, calibration.get("hourly_residual_correction"))
     if anchor is not None:
         out = apply_profile_blend(out, anchor, plant, calibration.get("profile_blend"))
-        out = apply_level_anchor_blend(out, current, anchor, plant, calibration.get("level_anchor_blend"))
+        level_anchor_blend = capped_recursive_anchor_config(calibration.get("level_anchor_blend"))
+        out = apply_level_anchor_blend(out, current, anchor, plant, level_anchor_blend)
     return np.clip(out, 0.0, CAPACITY_MW[plant] * 1.05)
 
 
